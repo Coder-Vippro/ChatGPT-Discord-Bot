@@ -1,0 +1,7 @@
+discord.py         
+requests            
+beautifulsoup4     
+openai              
+aiohttp             
+runware             
+Pillow              
