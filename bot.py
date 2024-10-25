@@ -336,15 +336,15 @@ async def handle_user_message(message: discord.Message):
         logging.error(f"Error handling user message: {error_message}")
         await message.channel.send(error_message)
 
-# Slash command for image generation
 @tree.command(name='generate', description='Generates an image from a text prompt.')
 @app_commands.describe(prompt='The prompt for image generation')
 async def generate_image(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer(thinking=True)  # Indicate that the bot is processing
     await _generate_image_command(interaction, prompt)
+
 async def _generate_image_command(interaction: discord.Interaction, prompt: str):
     try:
-        # Tạo yêu cầu tạo hình ảnh
+        # Create the image generation request
         request_image = IImageInference(
             positivePrompt=prompt,
             model="runware:100@1",
@@ -352,27 +352,20 @@ async def _generate_image_command(interaction: discord.Interaction, prompt: str)
             height=2048,
             width=2048
         )
-        
-        # Gọi API để lấy kết quả
+
+        # Call the API to get results
         images = await runware.imageInference(requestImage=request_image)
 
-        # Kiểm tra giá trị trả về của API
+        # Check the returned value from the API
         if images is None:
             raise ValueError("API returned None for images")
 
-        # Tải ảnh về từ URL và gửi dưới dạng file đính kèm
-        image_files = []
-        async with aiohttp.ClientSession() as session:
-            for image in images:
-                async with session.get(image.imageURL) as resp:
-                    if resp.status == 200:
-                        image_files.append(await resp.read())
-                    else:
-                        logging.error(f"Failed to download image: {image.imageURL} with status {resp.status}")
-
-        # Gửi ảnh dưới dạng file đính kèm
-        if image_files:
-            await interaction.followup.send(files=[discord.File(io.BytesIO(img), filename=f"image_{i}.png") for i, img in enumerate(image_files)])
+        # Send back the image URLs
+        image_urls = [image.imageURL for image in images]
+        
+        if image_urls:
+            # Join URLs into a string and send it as a message
+            await interaction.followup.send("\n".join(image_urls))
         else:
             await interaction.followup.send("No images were generated.")
     except Exception as e:
