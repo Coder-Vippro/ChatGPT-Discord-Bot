@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   bot:
-    image: ghcr.io/coder-vippro/ChatGPT-Discord-Bot:latest
+    image: ghcr.io/coder-vippro/chatgpt-discord-bot:latest
     env_file:
       - .env
     restart: always

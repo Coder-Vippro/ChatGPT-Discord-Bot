@@ -45,13 +45,13 @@ jobs:
 
       - name: Build the Docker image
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
+          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
           docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
       - name: Push the Docker image
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
+          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
           docker push $IMAGE_NAME:$IMAGE_TAG
 
@@ -71,19 +71,19 @@ jobs:
       # Step 2: Stop and remove the previous running container
       - name: Remove old running container
         run: |
-          docker rm -f discordllm405b || true
+          docker rm -f chatgpt-discord-bot || true
 
       # Step 3: Pull and Run Docker container from GHCR
       - name: Pull and Run Docker container from GHCR
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
+          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
 
           # Pull the latest image from GHCR
           docker pull $IMAGE_NAME:$IMAGE_TAG
 
           # Run the new container with the latest image and pass in environment variables securely
-          docker run -d --name discordllm405b \
+          docker run -d --name chatgpt-discord-bot \
             -e DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }} \
             -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
             -e RUNWARE_API_KEY=${{ secrets.RUNWARE_API_KEY }} \
