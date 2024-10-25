@@ -21,7 +21,7 @@ Welcome to the **Discord Bot with OpenAI Integration** project! This bot leverag
 - Python 3.12.7
 - Discord Bot Token
 - OpenAI API Key
-- RunwayML API Key
+- Runware API Key
 - Google API Key and CX
 
 ## Setup
