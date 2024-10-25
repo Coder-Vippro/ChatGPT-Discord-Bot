@@ -1,4 +1,4 @@
-name: Build and Run discordllm405b Docker
+name: Build and Run ChatGPT-Discord-Bot Docker
 
 on:
   push:
