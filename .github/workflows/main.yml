@@ -45,13 +45,13 @@ jobs:
 
       - name: Build the Docker image
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
+          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
           IMAGE_TAG=latest
           docker build -t $IMAGE_NAME:$IMAGE_TAG .
 
       - name: Push the Docker image
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
+          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
           IMAGE_TAG=latest
           docker push $IMAGE_NAME:$IMAGE_TAG
 
@@ -76,7 +76,7 @@ jobs:
       # Step 3: Pull and Run Docker container from GHCR
       - name: Pull and Run Docker container from GHCR
         run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
+          IMAGE_NAME=ghcr.io/coder-vippro/ChatGPT-Discord-Bot
           IMAGE_TAG=latest
 
           # Pull the latest image from GHCR
