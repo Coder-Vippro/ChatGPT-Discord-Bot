@@ -1,0 +1,35 @@
+name: Check for ChatGPT-Discord-Bot Docker
+
+on:
+  pull_request:
+    branches:
+      - main  # You can specify the branch that the pull request should target
+
+jobs:
+  # Run unit tests for the project
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: '3.12.3'
+        
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/
+      
+      # Run security check
+      - name: pyupio/safety-action
+        uses: pyupio/safety-action@v1.0.1
+        with:
+          api-key: ${{ secrets.SAFETY_API_KEY }}
