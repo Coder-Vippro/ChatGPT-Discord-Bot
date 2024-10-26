@@ -17,7 +17,7 @@ jobs:
         uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.12.3'
-
+        
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -27,7 +27,13 @@ jobs:
       - name: Run unit tests
         run: |
           python -m pytest tests/
-
+      
+      #run security check
+      - name: pyupio/safety-action
+        uses: pyupio/safety-action@v1.0.1
+        with:
+          api-key: ${{ secrets.SAFETY_API_KEY }}
+            
   # Build and push package to GitHub Container Registry (GHCR)
   build-and-push-to-ghcr:
     runs-on: ubuntu-latest
