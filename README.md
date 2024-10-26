@@ -39,7 +39,7 @@ To get started, ensure you have:
      RUNWARE_API_KEY=your_runware_api_key
      GOOGLE_API_KEY=your_google_api_key
      GOOGLE_CX=your_google_cx
-     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://
+     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
      ```
    - Use the following `docker-compose.yml`:
      ```yaml
@@ -62,6 +62,15 @@ To get started, ensure you have:
      ```bash
      git clone https://github.com/Coder-Vippro/ChatGPT-Discord-Bot.git
      cd ChatGPT-Discord-Bot
+     ```
+   - Create a `.env` file in the root directory with your configuration:
+     ```properties
+     DISCORD_TOKEN=your_discord_token
+     OPENAI_API_KEY=your_openai_api_key
+     RUNWARE_API_KEY=your_runware_api_key
+     GOOGLE_API_KEY=your_google_api_key
+     GOOGLE_CX=your_google_cx
+     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
      ```
    - Install the dependencies:
      ```bash
