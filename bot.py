@@ -114,7 +114,7 @@ bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=80)
 tree = bot.tree  # For slash commands
 
 # Function to perform a Google search and return results
-def google_custom_search(query: str, num_results: int = 3) -> list:
+def google_custom_search(query: str, num_results: int = 6) -> list:
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {
         "key": GOOGLE_API_KEY,
@@ -147,20 +147,24 @@ def google_custom_search(query: str, num_results: int = 3) -> list:
 def scrape_web_content(url: str) -> str:
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36'
         }
-        page = requests.get(url, headers=headers, timeout=10)  # Thêm timeout
+        page = requests.get(url, headers=headers, timeout=10)  # Add timeout
 
-        # Kiểm tra mã trạng thái HTTP
+        # Check HTTP status code
         if page.status_code != 200:
             return f"Error: Received status code {page.status_code} for {url}"
 
         soup = BeautifulSoup(page.content, "html.parser")
 
-        # Trích xuất nội dung chính
+        # Extract all paragraphs
         paragraphs = soup.find_all("p")
-        text = " ".join([p.get_text() for p in paragraphs[:5]])  # Lấy 5 đoạn đầu tiên
-        return text.strip() if text else "No content found."
+        if paragraphs:
+            text = " ".join([p.get_text() for p in paragraphs])
+            return text.strip()
+        else:
+            return "No content found."
+
     except requests.exceptions.RequestException as e:
         return f"Failed to scrape {url}: {str(e)}"
     except Exception as e:
