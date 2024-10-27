@@ -64,6 +64,7 @@ jobs:
   # Deploy from GHCR to the main server
   deploy-to-main-server:
     runs-on: self-hosted
+    environment: Private Server Deploy  # Specify the deployment environment
     needs: build-and-push-to-ghcr  # This job depends on the GHCR push job
     steps:
       # Step 1: Log in to GitHub Container Registry
