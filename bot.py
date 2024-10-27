@@ -1,7 +1,7 @@
 import os
 import discord
 import io
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import requests
 from bs4 import BeautifulSoup  # For web scraping
@@ -17,14 +17,74 @@ import re
 from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
-# OpenAI client initialization
 load_dotenv()
+
+# OpenAI client initialization
 client = OpenAI(
     base_url=str(os.getenv("OPENAI_BASE_URL")),
     api_key=str(os.getenv("OPENAI_API_KEY")),
 )
-WEB_SCRAPING_PROMPT = "Now you are web browsing, the data you get now is the data scraped from 5 websites. Please respond correctly and insightfully."
-NORMAL_CHAT_PROMPT = "You are ChatGPT but for discord, you can generate images, search the web, and chat with me. Please respond correctly and insightfully, make the respond that user can easily copied to discord chat, you must not use markdown or anything related to that."
+
+# List of bot statuses
+statuses = [
+    "Powered by GPT-4o!",
+    "Generating creative text!",
+    "Creating images on demand!",
+    "Answering your queries with AI!",
+    "Exploring AI capabilities!",
+    "Crafting stories with GPT!",
+    "Generating artwork with AI!",
+    "Transforming ideas into text!",
+    "Your personal AI assistant!",
+    "Making text-based magic happen!",
+    "Bringing your prompts to life!",
+    "Searching the web for you!",
+    "Summarizing information with AI!",
+    "Discussing the latest AI trends!",
+    "Innovating with neural networks!",
+    "Providing image generation services!",
+    "Curating knowledge with AI!",
+    "Explaining concepts in simple terms!",
+    "Generating visuals for your ideas!",
+    "Answering coding questions!",
+    "Enhancing your creativity!",
+    "Crafting engaging dialogues!",
+    "Bringing imagination to reality!",
+    "Your AI-powered content creator!",
+    "Exploring the world of AI art!",
+    "Helping you learn with AI!",
+    "Generating prompts for inspiration!",
+    "Creating stunning visuals!",
+    "Answering trivia questions!",
+    "Your source for AI-generated insights!",
+    "Delving into the world of machine learning!",
+    "Providing data-driven answers!",
+    "Crafting personalized content!",
+    "Exploring creative AI solutions!",
+    "Summarizing articles for you!",
+    "Generating memes with AI!",
+    "Transforming text into images!",
+    "Enhancing your projects with AI!",
+    "Creating unique characters with GPT!",
+    "Exploring AI storytelling!",
+    "Generating logos and designs!",
+    "Helping you brainstorm ideas!",
+    "Creating educational content!",
+    "Your creative writing partner!",
+    "Building narratives with AI!",
+    "Exploring ethical AI use!",
+    "Bringing concepts to life visually!",
+    "Your AI companion for learning!",
+    "Generating infographics!",
+    "Creating art based on your prompts!",
+    "Exploring AI in entertainment!",
+    "Your gateway to AI innovation!",
+]
+
+# Prompt for different plugins
+WEB_SCRAPING_PROMPT = "You are using the Web Scraping Plugin, gathering information from given url. Respond accurately and combine data to provide a clear, insightful summary."
+NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You can chat, generate images, and perform searches. Craft responses that are easy to copy directly into Discord chats, without using markdown, code blocks, or extra formatting."
+SEARCH_PROMPT = "You are using the Google Search Plugin, accessing information from the top 3 Google results. Summarize these findings clearly, adding relevant insights to answer the users question."
 
 # Google API details
 GOOGLE_API_KEY = str(os.getenv("GOOGLE_API_KEY"))  # Google API Key
@@ -49,9 +109,11 @@ TOKEN = str(os.getenv("DISCORD_TOKEN"))
 intents = discord.Intents.default()
 intents.message_content = True
 
+# Bot initialization
 bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=80)
 tree = bot.tree  # For slash commands
 
+# Function to perform a Google search and return results
 def google_custom_search(query: str, num_results: int = 3) -> list:
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {
@@ -135,12 +197,14 @@ async def process_queue(interaction):
         await command_func(interaction, *args)
         await asyncio.sleep(1)  # Optional delay between processing
 
+# Event to handle incoming interactions (slash commands)
 @bot.event
 async def on_ready():
     """Bot startup event to sync slash commands."""
     await tree.sync()  # Sync slash commands to the server
     print(f"Logged in as {bot.user}")
 
+# Slash command: /search (Search on Google and send results to AI model)
 @tree.command(name="search", description="Search on Google and send results to AI model.")
 @app_commands.describe(query="The search query")
 async def search(interaction: discord.Interaction, query: str):
@@ -166,12 +230,13 @@ async def search(interaction: discord.Interaction, query: str):
             title = link  # Use link as title; adjust as needed for your use case
             scraped_content.append(f"**{title}**\n{link}\n{content}\n")
 
-        combined_input = f"User query: {query}\nGoogle search results with content:\n{''.join(scraped_content)}"
+        # Combine input with the Search Prompt for context
+        combined_input = f"{SEARCH_PROMPT}\nUser query: {query}\nGoogle search results with content:\n{''.join(scraped_content)}"
         user_histories[user_id].append({"role": "system", "content": combined_input})
 
         # Send the query and results to OpenAI
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=user_histories[user_id],
             temperature=0.3,
             max_tokens=4096,
@@ -215,7 +280,7 @@ async def web(interaction: discord.Interaction, url: str):
 
         # Send the scraped content to OpenAI
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=user_histories[user_id],
             temperature=0.3,
             max_tokens=4096,
@@ -242,6 +307,7 @@ async def reset(interaction: discord.Interaction):
     user_histories.clear()  # Clear user conversation histories
     await interaction.response.send_message("All user data cleared and commands reset!", ephemeral=True)
 
+# Event to handle incoming messages
 @bot.event
 async def on_message(message: discord.Message):
     # Skip messages sent by the bot itself
@@ -336,7 +402,7 @@ async def handle_user_message(message: discord.Message):
         logging.error(f"Error handling user message: {error_message}")
         await message.channel.send(error_message)
 
-# Slash command for image generation
+# Slash command for image generation (/generate)
 @tree.command(name='generate', description='Generates an image from a text prompt.')
 @app_commands.describe(prompt='The prompt for image generation')
 async def generate_image(interaction: discord.Interaction, prompt: str):
@@ -379,6 +445,19 @@ async def _generate_image_command(interaction: discord.Interaction, prompt: str)
         error_message = f"An error occurred: {str(e)}"
         logging.error(f"Error in _generate_image_command: {error_message}")
         await interaction.followup.send(error_message)
+
+# Task to change status every minute
+@tasks.loop(minutes=5)
+async def change_status():
+    while True:
+        for status in statuses:
+            await bot.change_presence(activity=discord.Game(name=status))
+            await asyncio.sleep(300)  # Change every 60 seconds
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    change_status.start()  # Start the status changing loop
 
 # Main bot startup
 if __name__ == "__main__":
