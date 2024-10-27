@@ -37,6 +37,7 @@ jobs:
   # Build and push package to GitHub Container Registry (GHCR)
   build-and-push-to-ghcr:
     runs-on: ubuntu-latest 
+    environment: Private Server Deploy
     needs: CI  # This job depends on the CI job
     steps:
       - name: Check out the repository
