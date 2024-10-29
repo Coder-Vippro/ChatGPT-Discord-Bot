@@ -1,19 +1,18 @@
 import os
 import discord
 import io
+import sqlite3
 from discord.ext import commands, tasks
 from discord import app_commands
 import requests
-from bs4 import BeautifulSoup  # For web scraping
+from bs4 import BeautifulSoup
 import logging
 import sys
 from openai import OpenAI
 import aiohttp
-from runware import Runware, IImageInference, IPromptEnhance, IImageBackgroundRemoval, IImageCaption, IImageUpscale
+from runware import Runware, IImageInference
 from collections import defaultdict
 import asyncio
-import aiohttp
-import re
 from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
@@ -105,6 +104,55 @@ user_histories = {}
 # Bot token
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 
+# --- Database functions ---
+def create_tables():
+     conn = sqlite3.connect('chat_history.db')
+     cursor = conn.cursor()
+     cursor.execute('''
+         CREATE TABLE IF NOT EXISTS user_histories (
+             user_id INTEGER PRIMARY KEY,
+             history TEXT NOT NULL
+         )
+     ''')
+     conn.commit()
+     conn.close()
+
+# Function to get the user's chat history
+def get_history(user_id):
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT history FROM user_histories WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        return eval(result[0])  # Safely evaluate the history string
+    return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
+
+# Function to save the user's chat history
+def save_history(user_id, history):
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO user_histories (user_id, history)
+        VALUES (?, ?)
+    ''', (user_id, str(history)))  # Convert history to string for storage
+    conn.commit()
+    conn.close()
+
+# Function to initialize the database and create tables
+def initialize_db():
+    """Initializes the database and creates tables if the database file doesn't exist."""
+    db_file = 'chat_history.db'
+    
+    # Check if the database file exists
+    if not os.path.exists(db_file):
+        print(f"{db_file} not found. Creating tables...")
+        create_tables()
+    else:
+        print(f"{db_file} found. No need to create tables.")
+
+initialize_db() # Initialize the database
+
 # Intents and bot initialization
 intents = discord.Intents.default()
 intents.message_content = True
@@ -114,7 +162,7 @@ bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=80)
 tree = bot.tree  # For slash commands
 
 # Function to perform a Google search and return results
-def google_custom_search(query: str, num_results: int = 6) -> list:
+def google_custom_search(query: str, num_results: int = 3) -> list:
     search_url = "https://www.googleapis.com/customsearch/v1"
     params = {
         "key": GOOGLE_API_KEY,
@@ -123,25 +171,25 @@ def google_custom_search(query: str, num_results: int = 6) -> list:
         "num": num_results
     }
     try:
-        response = requests.get(search_url, params=params, timeout=15)  # Thêm timeout
-        response.raise_for_status()  # Kiểm tra lỗi HTTP
+        response = requests.get(search_url, params=params, timeout=15)  # Add timeout
+        response.raise_for_status()  # Check for any errors in the response
         data = response.json()
 
-        # Kiểm tra xem có trường 'items' không
+        # Check if 'items' key is present in the response
         if 'items' in data:
             results = []
             for item in data['items']:
-                title = item.get('title', 'No Title')  # Lấy tiêu đề
-                link = item.get('link', 'No Link')  # Lấy liên kết
+                title = item.get('title', 'No Title') # Get title or default to 'No Title'
+                link = item.get('link', 'No Link')  # Get link or default to 'No Link'
                 results.append(f"Title: {title}\nLink: {link}\n" + "-" * 80)
             return results
         else:
             print("No items found in the response.")
-            return []  # Trả về danh sách rỗng
+            return []  
 
     except requests.exceptions.RequestException as e:
         print(f"Error during request: {e}")
-        return []  # Trả về danh sách rỗng trong trường hợp có lỗi
+        return [] 
     
 # Function to scrape content from a webpage
 def scrape_web_content(url: str) -> str:
@@ -204,207 +252,235 @@ async def process_queue(interaction):
 # Event to handle incoming interactions (slash commands)
 @bot.event
 async def on_ready():
-    """Bot startup event to sync slash commands."""
-    await tree.sync()  # Sync slash commands to the server
-    print(f"Logged in as {bot.user}")
+    """Bot startup event to sync slash commands and create DB tables."""
+    await tree.sync()  # Make sure this line is present
+    print(f"Logged in as {bot.user}") 
 
-# Slash command: /search (Search on Google and send results to AI model)
+# Slash command for search (/search)
 @tree.command(name="search", description="Search on Google and send results to AI model.")
 @app_commands.describe(query="The search query")
 async def search(interaction: discord.Interaction, query: str):
+    """Searches Google and sends results to the AI model."""
+    await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
-    if user_id not in user_histories:
-        user_histories[user_id] = []
+    history = get_history(user_id)
 
-    user_histories[user_id].append({"role": "user", "content": query})
+    history.append({"role": "user", "content": query})
 
     try:
-        await interaction.response.defer(thinking=True)  # Acknowledge the command
-
         # Perform Google search
-        search_results = google_custom_search(query, num_results=3)
+        search_results = google_custom_search(query, num_results=5)
         if not search_results:
             await interaction.followup.send("No search results found.")
             return
 
-        # Scrape content from the first few links
-        scraped_content = []
-        for link in search_results:  # Loop through the links directly
-            content = scrape_web_content(link)  # Scrape the content of each link
-            title = link  # Use link as title; adjust as needed for your use case
-            scraped_content.append(f"**{title}**\n{link}\n{content}\n")
+        # Prepare the search results for the AI model
+        combined_input = f"{SEARCH_PROMPT}\nUser query: {query}\nGoogle search results:\n"
+        
+        # Extract URLs and prepare the message
+        links = []
+        for result in search_results:
+            url = result.split('\n')[1].split('Link: ')[1]  # Extract URL from the result string
+            links.append(url)
+            combined_input += f"{result}\n"
 
-        # Combine input with the Search Prompt for context
-        combined_input = f"{SEARCH_PROMPT}\nUser query: {query}\nGoogle search results with content:\n{''.join(scraped_content)}"
-        user_histories[user_id].append({"role": "system", "content": combined_input})
+        # Add links at the end of the combined input
+        combined_input += "\nLinks:\n" + "\n".join(links)
 
-        # Send the query and results to OpenAI
+        history.append({"role": "system", "content": combined_input})
+
+        # Send the history to the AI model
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=user_histories[user_id],
+            messages=history,
             temperature=0.3,
             max_tokens=4096,
             top_p=0.7
         )
 
         reply = response.choices[0].message.content
-        user_histories[user_id].append({"role": "assistant", "content": reply})
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
 
-        # Check if the reply is too long for Discord
-        if len(reply) > 2000:
-            with open("response.txt", "w") as file:
-                file.write(reply)
-            await interaction.followup.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
-        else:
-            await interaction.followup.send(reply)
+        # Prepare the final response including the links
+        links_message = "\nLinks:\n" + "\n".join(links)
+        await interaction.followup.send(reply + links_message)
 
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
-        
-# Slash command: /web (Scrape web data and send to AI model)
+
+# Slash command for web scraping (/web)
 @tree.command(name="web", description="Scrape a webpage and send data to AI model.")
 @app_commands.describe(url="The webpage URL to scrape")
 async def web(interaction: discord.Interaction, url: str):
+    """Scrapes a webpage and sends data to the AI model."""
+    await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
-    if user_id not in user_histories:
-        user_histories[user_id] = []
+    history = get_history(user_id)
 
     try:
-        await interaction.response.defer(thinking=True)  # Acknowledge the command
-
-        # Scrape the provided URL
         content = scrape_web_content(url)
-
         if content.startswith("Failed"):
-            await interaction.followup.send(content)  # If scraping failed, send error
+            await interaction.followup.send(content)
             return
 
-        user_histories[user_id].append({"role": "user", "content": f"Scraped content from {url}"})
-        user_histories[user_id].append({"role": "system", "content": content})
+        history.append({"role": "user", "content": f"Scraped content from {url}"})
+        history.append({"role": "system", "content": content})
 
-        # Send the scraped content to OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=user_histories[user_id],
+            messages=history,
             temperature=0.3,
             max_tokens=4096,
             top_p=0.7
         )
 
         reply = response.choices[0].message.content
-        user_histories[user_id].append({"role": "assistant", "content": reply})
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
 
-        # Check if the reply is too long for Discord
-        if len(reply) > 2000:
-            with open("response.txt", "w") as file:
-                file.write(reply)
-            await interaction.followup.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
-        else:
-            await interaction.followup.send(reply)
+        await send_response(interaction, reply)
 
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
-# Reset command to clear user histories and resync slash commands
-@tree.command(name="reset", description="Reset the bot by clearing all user data and commands.")
+
+@tree.command(name="reset", description="Reset the bot by clearing user data.")
 async def reset(interaction: discord.Interaction):
-    user_histories.clear()  # Clear user conversation histories
-    await interaction.response.send_message("All user data cleared and commands reset!", ephemeral=True)
+    """Resets the bot by clearing user data."""
+    user_id = interaction.user.id  # Get the user ID of the person who invoked the command
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    
+    # Delete user data based on their user_id
+    cursor.execute('DELETE FROM user_histories WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    
+    await interaction.response.send_message("Your data has been cleared!", ephemeral=True)
+
+# Function to send a response to the user
+async def send_response(interaction: discord.Interaction, reply: str):
+    """Sends the reply to the user, handling long responses."""
+    if len(reply) > 2000:
+        with open("response.txt", "w") as file:
+            file.write(reply)
+        await interaction.followup.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
+    else:
+        await interaction.followup.send(reply)
 
 # Event to handle incoming messages
 @bot.event
 async def on_message(message: discord.Message):
-    # Skip messages sent by the bot itself
+    """Handles incoming messages, responding to replies, mentions, and DMs."""
     if message.author == bot.user:
         return
 
-    # Check if the message is a reply to the specific bot message, a mention of the bot, or sent in DMs
-    is_bot_reply = False
-    if message.reference and message.reference.resolved:
-        # Check if the referenced message ID is the one we are targeting
-        referenced_message = message.reference.resolved
-        if referenced_message.id == 1270288366289813556:
-            is_bot_reply = True
-
-    is_mention = bot.user.mentioned_in(message)
-    is_dm = message.guild is None
-
-    # Only respond if the user replies to the specific bot message, mentions the bot, or sends a DM
-    if is_bot_reply or is_mention or is_dm:
+    if should_respond_to_message(message):
         await handle_user_message(message)
     else:
-        await bot.process_commands(message)  # Process slash commands
+        await bot.process_commands(message)
 
+# Function to check if the bot should respond to a message
+def should_respond_to_message(message: discord.Message) -> bool:
+    """Checks if the bot should respond to the message."""
+    is_bot_reply = (message.reference and 
+                    message.reference.resolved and 
+                    message.reference.resolved.id == 1270288366289813556)
+    is_mention = bot.user.mentioned_in(message)
+    is_dm = message.guild is None
+    return is_bot_reply or is_mention or is_dm
+
+# Function to handle user messages
 async def handle_user_message(message: discord.Message):
+    """Processes user messages and generates responses."""
     user_id = message.author.id
-    
-    # Initialize history if not present
-    if user_id not in user_histories:
-        # Add the system prompt at the start of the history
-        user_histories[user_id] = [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
+    history = get_history(user_id)
 
-    # Check for image attachments and combine them with the message content
-    if message.attachments:  # If there's an image
+    # Supported text/code file extensions
+    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
+
+    # Check if there's an attachment and handle various file types
+    if message.attachments:
+        attachment = message.attachments[0]
+        file_content = await attachment.read()
+        user_message_content = file_content.decode("utf-8")
+
+        # If file is `message.txt`, use it directly as the user message without a prompt
+        if attachment.filename == "message.txt":
+            user_message_text = user_message_content
+        else:
+            # Otherwise, structure with an optional user prompt
+            if message.content:
+                user_message_text = f"{message.content}\n\n{user_message_content}"
+            else:
+                user_message_text = user_message_content
+    else:
+        # Regular text message if no attachment is present
+        user_message_text = message.content
+
+    # Process image attachments if they exist and aren't text/code files
+    if message.attachments and not any(attachment.filename.endswith(ext) for ext in supported_file_types):
         image_url = message.attachments[0].url
-        if message.content:  # If there's also text
-            user_histories[user_id].append({
-                "role": "user", 
+        if user_message_text:
+            history.append({
+                "role": "user",
                 "content": [
-                    {"type": "text", "text": message.content},
+                    {"type": "text", "text": user_message_text},
                     {"type": "image_url", "image_url": {"url": image_url}}
                 ]
             })
-        else:  # Only image, no text
-            user_histories[user_id].append({
-                "role": "user", 
+        else:
+            history.append({
+                "role": "user",
                 "content": [
                     {"type": "text", "text": "Here's an image."},
                     {"type": "image_url", "image_url": {"url": image_url}}
                 ]
             })
-    else:  # Handle regular text messages
-        user_histories[user_id].append({"role": "user", "content": message.content})
+    else:
+        history.append({"role": "user", "content": user_message_text})
 
-    # Limit history to avoid token overflow
-    def trim_history(history):
-        tokens_used = sum(len(str(item['content'])) for item in history)
-        max_tokens_allowed = 9000  # Keeping some buffer to avoid overflow
-        
-        while tokens_used > max_tokens_allowed:
-            removed_item = history.pop(1)  # Remove the oldest user or assistant message, keep the system prompt
-            tokens_used -= len(str(removed_item['content']))
-    
-    # Trim the history if needed
-    trim_history(user_histories[user_id])
+    trim_history(history)  # Trim history before sending to OpenAI
 
     try:
-        # Prepare and send the message to OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=user_histories[user_id],
+            messages=history,
             temperature=0.3,
-            max_tokens=4096,  # Adjusted max_tokens to avoid overuse
+            max_tokens=4096,
             top_p=0.7
         )
-        
-        # Get the assistant's reply
+
         reply = response.choices[0].message.content
-        
-        # Add assistant's reply to history
-        user_histories[user_id].append({"role": "assistant", "content": reply})
-        
-        # Check if the reply is too long for Discord
-        if len(reply) > 2000:
-            with open("response.txt", "w") as file:
-                file.write(reply)
-            await message.channel.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
-        else:
-            await message.channel.send(reply)
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
+
+        await send_response(message.channel, reply)
 
     except Exception as e:
         error_message = f"Error: {str(e)}"
         logging.error(f"Error handling user message: {error_message}")
         await message.channel.send(error_message)
+
+# Function to trim the history to avoid exceeding token limits
+def trim_history(history):
+    """Trims the history to avoid exceeding token limits."""
+    tokens_used = sum(len(str(item['content'])) for item in history)
+    max_tokens_allowed = 9000
+    while tokens_used > max_tokens_allowed:
+        removed_item = history.pop(1)
+        tokens_used -= len(str(removed_item['content']))
+
+# Function to send a response to the channel
+async def send_response(channel: discord.TextChannel, reply: str):
+    """Sends the reply to the channel, handling long responses."""
+    if len(reply) > 2000:
+        with open("response.txt", "w") as file:
+            file.write(reply)
+        await channel.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
+    else:
+        await channel.send(reply)
 
 # Slash command for image generation (/generate)
 @tree.command(name='generate', description='Generates an image from a text prompt.')
@@ -458,6 +534,7 @@ async def change_status():
             await bot.change_presence(activity=discord.Game(name=status))
             await asyncio.sleep(300)  # Change every 60 seconds
 
+# Event to handle bot startup
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
