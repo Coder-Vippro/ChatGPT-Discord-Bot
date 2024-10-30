@@ -249,12 +249,6 @@ async def process_queue(interaction):
         await command_func(interaction, *args)
         await asyncio.sleep(1)  # Optional delay between processing
 
-# Event to handle incoming interactions (slash commands)
-@bot.event
-async def on_ready():
-    """Bot startup event to sync slash commands and create DB tables."""
-    await tree.sync()  # Make sure this line is present
-    print(f"Logged in as {bot.user}") 
 
 # Slash command for search (/search)
 @tree.command(name="search", description="Search on Google and send results to AI model.")
@@ -483,7 +477,7 @@ async def send_response(channel: discord.TextChannel, reply: str):
         await channel.send(reply)
 
 # Slash command for o1-preview model (/o1-preview)
-@tree.command(name="o1-preview", description="Generates a response using the OpenAI o1-preview model.")
+@tree.command(name="o1preview", description="Generates a response using the OpenAI o1-preview model.")
 @app_commands.describe(prompt="The prompt to generate a response for.")
 async def o1_preview(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()  # Defer to give bot time for processing if needed
@@ -538,10 +532,10 @@ async def o1_preview(interaction: discord.Interaction, prompt: str):
         error_message = f"Error: {str(e)}"
         await interaction.followup.send(content=error_message, ephemeral=True)
 
-# Slash command for o1-preview model (/o1-mini)
-@tree.command(name="o1-mini", description="Generates a response using the OpenAI o1-mini model.")
+# Slash command for o1-mini model (/o1-mini)
+@tree.command(name="o1mini", description="Generates a response using the OpenAI o1-mini model.")
 @app_commands.describe(prompt="The prompt to generate a response for.")
-async def o1_preview(interaction: discord.Interaction, prompt: str):
+async def o1_mini(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()  # Defer to give bot time for processing if needed
 
     user_id = interaction.user.id
@@ -645,6 +639,13 @@ async def change_status():
         for status in statuses:
             await bot.change_presence(activity=discord.Game(name=status))
             await asyncio.sleep(300)  # Change every 60 seconds
+
+# Event to handle incoming interactions (slash commands)
+@bot.event
+async def on_ready():
+    """Bot startup event to sync slash commands and create DB tables."""
+    await tree.sync()  # Make sure this line is present
+    print(f"Logged in as {bot.user}") 
 
 # Event to handle bot startup
 @bot.event
