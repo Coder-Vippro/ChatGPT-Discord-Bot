@@ -482,6 +482,118 @@ async def send_response(channel: discord.TextChannel, reply: str):
     else:
         await channel.send(reply)
 
+# Slash command for o1-preview model (/o1-preview)
+@tree.command(name="o1-preview", description="Generates a response using the OpenAI o1-preview model.")
+@app_commands.describe(prompt="The prompt to generate a response for.")
+async def o1_preview(interaction: discord.Interaction, prompt: str):
+    await interaction.response.defer()  # Defer to give bot time for processing if needed
+
+    user_id = interaction.user.id
+    history = get_history(user_id)
+
+    # Retrieve text/code attachments only (no image handling)
+    attachments = interaction.message.attachments if interaction.message else []
+    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
+
+    # Process text/code file attachments or regular prompt
+    if attachments:
+        attachment = attachments[0]
+        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
+            file_content = await attachment.read()
+            user_message_content = file_content.decode("utf-8")
+
+            # If file is `message.txt`, use it directly as the user message without a prompt
+            if attachment.filename == "message.txt":
+                user_message_text = user_message_content
+            else:
+                user_message_text = f"{prompt}\n\n{user_message_content}" if prompt else user_message_content
+        else:
+            await interaction.followup.send("Unsupported file type. Only text/code files are allowed.", ephemeral=True)
+            return
+    else:
+        user_message_text = prompt
+
+    # Add the prompt or combined prompt + file content to history
+    history.append({"role": "user", "content": user_message_text})
+
+    trim_history(history)  # Trim history to fit token limits
+
+    # Generate response using OpenAI model
+    try:
+        response = client.chat.completions.create(
+            model="o1-preview",
+            messages=history,
+            temperature=0.3,
+            max_tokens=4096,
+            top_p=0.7
+        )
+
+        reply = response.choices[0].message.content
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
+
+        await send_response(interaction, reply)
+
+    except Exception as e:
+        error_message = f"Error: {str(e)}"
+        await interaction.followup.send(content=error_message, ephemeral=True)
+
+# Slash command for o1-preview model (/o1-mini)
+@tree.command(name="o1-mini", description="Generates a response using the OpenAI o1-mini model.")
+@app_commands.describe(prompt="The prompt to generate a response for.")
+async def o1_preview(interaction: discord.Interaction, prompt: str):
+    await interaction.response.defer()  # Defer to give bot time for processing if needed
+
+    user_id = interaction.user.id
+    history = get_history(user_id)
+
+    # Retrieve text/code attachments only (no image handling)
+    attachments = interaction.message.attachments if interaction.message else []
+    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
+
+    # Process text/code file attachments or regular prompt
+    if attachments:
+        attachment = attachments[0]
+        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
+            file_content = await attachment.read()
+            user_message_content = file_content.decode("utf-8")
+
+            # If file is `message.txt`, use it directly as the user message without a prompt
+            if attachment.filename == "message.txt":
+                user_message_text = user_message_content
+            else:
+                user_message_text = f"{prompt}\n\n{user_message_content}" if prompt else user_message_content
+        else:
+            await interaction.followup.send("Unsupported file type. Only text/code files are allowed.", ephemeral=True)
+            return
+    else:
+        user_message_text = prompt
+
+    # Add the prompt or combined prompt + file content to history
+    history.append({"role": "user", "content": user_message_text})
+
+    trim_history(history)  # Trim history to fit token limits
+
+    # Generate response using OpenAI model
+    try:
+        response = client.chat.completions.create(
+            model="o1-mini",
+            messages=history,
+            temperature=0.3,
+            max_tokens=4096,
+            top_p=0.7
+        )
+
+        reply = response.choices[0].message.content
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
+
+        await send_response(interaction, reply)
+
+    except Exception as e:
+        error_message = f"Error: {str(e)}"
+        await interaction.followup.send(content=error_message, ephemeral=True)
+
 # Slash command for image generation (/generate)
 @tree.command(name='generate', description='Generates an image from a text prompt.')
 @app_commands.describe(prompt='The prompt for image generation')
