@@ -79,6 +79,13 @@ statuses = [
     "Exploring AI in entertainment!",
     "Your gateway to AI innovation!",
 ]
+# List of available models
+MODEL_OPTIONS = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o1-preview",
+    "o1-mini"
+]
 
 # Prompt for different plugins
 WEB_SCRAPING_PROMPT = "You are using the Web Scraping Plugin, gathering information from given url. Respond accurately and combine data to provide a clear, insightful summary."
@@ -106,18 +113,23 @@ TOKEN = str(os.getenv("DISCORD_TOKEN"))
 
 # --- Database functions ---
 def create_tables():
-     conn = sqlite3.connect('chat_history.db')
-     cursor = conn.cursor()
-     cursor.execute('''
-         CREATE TABLE IF NOT EXISTS user_histories (
-             user_id INTEGER PRIMARY KEY,
-             history TEXT NOT NULL
-         )
-     ''')
-     conn.commit()
-     conn.close()
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_histories (
+            user_id INTEGER PRIMARY KEY,
+            history TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER PRIMARY KEY,
+            model TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# Function to get the user's chat history
 def get_history(user_id):
     conn = sqlite3.connect('chat_history.db')
     cursor = conn.cursor()
@@ -125,26 +137,41 @@ def get_history(user_id):
     result = cursor.fetchone()
     conn.close()
     if result:
-        return eval(result[0])  # Safely evaluate the history string
+        return eval(result[0])
     return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
 
-# Function to save the user's chat history
 def save_history(user_id, history):
     conn = sqlite3.connect('chat_history.db')
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO user_histories (user_id, history)
         VALUES (?, ?)
-    ''', (user_id, str(history)))  # Convert history to string for storage
+    ''', (user_id, str(history)))
     conn.commit()
     conn.close()
 
-# Function to initialize the database and create tables
+# New function to get the user's model preference
+def get_user_model(user_id):
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT model FROM user_preferences WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else "gpt-4o-mini"  # Default to "gpt-4o" if no preference
+
+# New function to save the user's model preference
+def save_user_model(user_id, model):
+    conn = sqlite3.connect('chat_history.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO user_preferences (user_id, model)
+        VALUES (?, ?)
+    ''', (user_id, model))
+    conn.commit()
+    conn.close()
+
 def initialize_db():
-    """Initializes the database and creates tables if the database file doesn't exist."""
     db_file = 'chat_history.db'
-    
-    # Check if the database file exists
     if not os.path.exists(db_file):
         print(f"{db_file} not found. Creating tables...")
         create_tables()
@@ -249,6 +276,26 @@ async def process_queue(interaction):
         await command_func(interaction, *args)
         await asyncio.sleep(1)  # Optional delay between processing
 
+# Slash command to let users choose a model and save it to the database
+@tree.command(name="choose_model", description="Select the AI model to use for responses.")
+async def choose_model(interaction: discord.Interaction):
+    options = [discord.SelectOption(label=model, value=model) for model in MODEL_OPTIONS]
+    select_menu = discord.ui.Select(placeholder="Choose a model", options=options)
+
+    async def select_callback(interaction: discord.Interaction):
+        selected_model = select_menu.values[0]
+        user_id = interaction.user.id
+        
+        # Save the model selection to the database
+        save_user_model(user_id, selected_model)
+        await interaction.response.send_message(
+            f"Model set to `{selected_model}` for your responses.", ephemeral=True
+        )
+
+    select_menu.callback = select_callback
+    view = discord.ui.View()
+    view.add_item(select_menu)
+    await interaction.response.send_message("Choose a model:", view=view, ephemeral=True)
 
 # Slash command for search (/search)
 @tree.command(name="search", description="Search on Google and send results to AI model.")
@@ -285,7 +332,7 @@ async def search(interaction: discord.Interaction, query: str):
 
         # Send the history to the AI model
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=history,
             temperature=0.3,
             max_tokens=4096,
@@ -353,6 +400,16 @@ async def reset(interaction: discord.Interaction):
     
     await interaction.response.send_message("Your data has been cleared!", ephemeral=True)
 
+# Function to check if the bot should respond to a message
+def should_respond_to_message(message: discord.Message) -> bool:
+    """Checks if the bot should respond to the message."""
+    is_bot_reply = (message.reference and 
+                    message.reference.resolved and 
+                    message.reference.resolved.id == 1270288366289813556)
+    is_mention = bot.user.mentioned_in(message)
+    is_dm = message.guild is None
+    return is_bot_reply or is_mention or is_dm
+
 # Function to send a response to the user
 async def send_response(interaction: discord.Interaction, reply: str):
     """Sends the reply to the user, handling long responses."""
@@ -375,21 +432,11 @@ async def on_message(message: discord.Message):
     else:
         await bot.process_commands(message)
 
-# Function to check if the bot should respond to a message
-def should_respond_to_message(message: discord.Message) -> bool:
-    """Checks if the bot should respond to the message."""
-    is_bot_reply = (message.reference and 
-                    message.reference.resolved and 
-                    message.reference.resolved.id == 1270288366289813556)
-    is_mention = bot.user.mentioned_in(message)
-    is_dm = message.guild is None
-    return is_bot_reply or is_mention or is_dm
-
-# Function to handle user messages
 async def handle_user_message(message: discord.Message):
     """Processes user messages and generates responses."""
     user_id = message.author.id
     history = get_history(user_id)
+    model = get_user_model(user_id)
 
     # Supported text/code file extensions
     supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
@@ -413,38 +460,52 @@ async def handle_user_message(message: discord.Message):
         # Regular text message if no attachment is present
         user_message_text = message.content
 
-    # Process image attachments if they exist and aren't text/code files
-    if message.attachments and not any(attachment.filename.endswith(ext) for ext in supported_file_types):
-        image_url = message.attachments[0].url
-        if user_message_text:
-            history.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_message_text},
-                    {"type": "image_url", "image_url": {"url": image_url}}
-                ]
-            })
-        else:
-            history.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "Here's an image."},
-                    {"type": "image_url", "image_url": {"url": image_url}}
-                ]
-            })
+    # Check model and adjust behavior
+    if model in ["o1-mini", "o1-preview"]:
+        # Disable image support and system prompt
+        history.append({"role": "user", "content": user_message_text})  # Just store the user message
     else:
-        history.append({"role": "user", "content": user_message_text})
+        # Process image attachments if they exist and aren't text/code files
+        if message.attachments and not any(attachment.filename.endswith(ext) for ext in supported_file_types):
+            image_url = message.attachments[0].url
+            if user_message_text:
+                history.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_message_text},
+                        {"type": "image_url", "image_url": {"url": image_url}}
+                    ]
+                })
+            else:
+                history.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Here's an image."},
+                        {"type": "image_url", "image_url": {"url": image_url}}
+                    ]
+                })
+        else:
+            history.append({"role": "user", "content": user_message_text})
 
-    trim_history(history)  # Trim history before sending to OpenAI
+    # Trim history before sending to OpenAI
+    trim_history(history)
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=history,
-            temperature=0.3,
-            max_tokens=4096,
-            top_p=0.7
-        )
+        # Check if the system prompt should be included based on the model
+        if model in ["o1-mini", "o1-preview"]:
+            # Skip the system prompt
+            response = client.chat.completions.create(
+                model=model,
+                messages=history[1:]  # Skip system prompt
+            )
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=history,
+                temperature=0.3,
+                max_tokens=4096,
+                top_p=0.7
+            )
 
         reply = response.choices[0].message.content
         history.append({"role": "assistant", "content": reply})
@@ -475,118 +536,6 @@ async def send_response(channel: discord.TextChannel, reply: str):
         await channel.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
     else:
         await channel.send(reply)
-
-# Slash command for o1-preview model (/o1-preview)
-@tree.command(name="o1preview", description="Generates a response using the OpenAI o1-preview model.")
-@app_commands.describe(prompt="The prompt to generate a response for.")
-async def o1_preview(interaction: discord.Interaction, prompt: str):
-    await interaction.response.defer()  # Defer to give bot time for processing if needed
-
-    user_id = interaction.user.id
-    history = get_history(user_id)
-
-    # Retrieve text/code attachments only (no image handling)
-    attachments = interaction.message.attachments if interaction.message else []
-    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
-
-    # Process text/code file attachments or regular prompt
-    if attachments:
-        attachment = attachments[0]
-        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
-            file_content = await attachment.read()
-            user_message_content = file_content.decode("utf-8")
-
-            # If file is `message.txt`, use it directly as the user message without a prompt
-            if attachment.filename == "message.txt":
-                user_message_text = user_message_content
-            else:
-                user_message_text = f"{prompt}\n\n{user_message_content}" if prompt else user_message_content
-        else:
-            await interaction.followup.send("Unsupported file type. Only text/code files are allowed.", ephemeral=True)
-            return
-    else:
-        user_message_text = prompt
-
-    # Add the prompt or combined prompt + file content to history
-    history.append({"role": "user", "content": user_message_text})
-
-    trim_history(history)  # Trim history to fit token limits
-
-    # Generate response using OpenAI model
-    try:
-        response = client.chat.completions.create(
-            model="o1-preview",
-            messages=history,
-            temperature=0.3,
-            max_tokens=4096,
-            top_p=0.7
-        )
-
-        reply = response.choices[0].message.content
-        history.append({"role": "assistant", "content": reply})
-        save_history(user_id, history)
-
-        await send_response(interaction, reply)
-
-    except Exception as e:
-        error_message = f"Error: {str(e)}"
-        await interaction.followup.send(content=error_message, ephemeral=True)
-
-# Slash command for o1-mini model (/o1-mini)
-@tree.command(name="o1mini", description="Generates a response using the OpenAI o1-mini model.")
-@app_commands.describe(prompt="The prompt to generate a response for.")
-async def o1_mini(interaction: discord.Interaction, prompt: str):
-    await interaction.response.defer()  # Defer to give bot time for processing if needed
-
-    user_id = interaction.user.id
-    history = get_history(user_id)
-
-    # Retrieve text/code attachments only (no image handling)
-    attachments = interaction.message.attachments if interaction.message else []
-    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
-
-    # Process text/code file attachments or regular prompt
-    if attachments:
-        attachment = attachments[0]
-        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
-            file_content = await attachment.read()
-            user_message_content = file_content.decode("utf-8")
-
-            # If file is `message.txt`, use it directly as the user message without a prompt
-            if attachment.filename == "message.txt":
-                user_message_text = user_message_content
-            else:
-                user_message_text = f"{prompt}\n\n{user_message_content}" if prompt else user_message_content
-        else:
-            await interaction.followup.send("Unsupported file type. Only text/code files are allowed.", ephemeral=True)
-            return
-    else:
-        user_message_text = prompt
-
-    # Add the prompt or combined prompt + file content to history
-    history.append({"role": "user", "content": user_message_text})
-
-    trim_history(history)  # Trim history to fit token limits
-
-    # Generate response using OpenAI model
-    try:
-        response = client.chat.completions.create(
-            model="o1-mini",
-            messages=history,
-            temperature=0.3,
-            max_tokens=4096,
-            top_p=0.7
-        )
-
-        reply = response.choices[0].message.content
-        history.append({"role": "assistant", "content": reply})
-        save_history(user_id, history)
-
-        await send_response(interaction, reply)
-
-    except Exception as e:
-        error_message = f"Error: {str(e)}"
-        await interaction.followup.send(content=error_message, ephemeral=True)
 
 # Slash command for image generation (/generate)
 @tree.command(name='generate', description='Generates an image from a text prompt.')
@@ -640,16 +589,10 @@ async def change_status():
             await bot.change_presence(activity=discord.Game(name=status))
             await asyncio.sleep(300)  # Change every 60 seconds
 
-# Event to handle incoming interactions (slash commands)
 @bot.event
 async def on_ready():
-    """Bot startup event to sync slash commands and create DB tables."""
-    await tree.sync()  # Make sure this line is present
-    print(f"Logged in as {bot.user}") 
-
-# Event to handle bot startup
-@bot.event
-async def on_ready():
+    """Bot startup event to sync slash commands and start status loop."""
+    await tree.sync()  # Sync slash commands
     print(f"Logged in as {bot.user}")
     change_status.start()  # Start the status changing loop
 
