@@ -385,7 +385,7 @@ async def web(interaction: discord.Interaction, url: str):
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
-
+# Reset user chat history from database
 @tree.command(name="reset", description="Reset the bot by clearing user data.")
 async def reset(interaction: discord.Interaction):
     """Resets the bot by clearing user data."""
@@ -399,6 +399,28 @@ async def reset(interaction: discord.Interaction):
     conn.close()
     
     await interaction.response.send_message("Your data has been cleared!", ephemeral=True)
+
+# Slash command for help (/help)
+@tree.command(name="help", description="Display a list of available commands.")
+async def help_command(interaction: discord.Interaction):
+    """Sends a list of available commands to the user."""
+    help_message = (
+        "**Available Commands:**\n"
+        "/choose_model - Select the AI model to use for responses (gpt-4o, gpt-4o-mini, o1-preview, o1-mini).\n"
+        "/search `<query>` - Search on Google and send results to AI model.\n"
+        "/web `<url>` - Scrape a webpage and send data to AI model.\n"
+        "/generate `<prompt>` - Generate an image from a text prompt.\n"
+        "/reset - Reset your conversation history.\n"
+        "/help - Display this help message.\n"
+        "**Các lệnh có sẵn:**\n"
+        "/choose_model - Chọn mô hình AI để sử dụng cho phản hồi (gpt-4o, gpt-4o-mini, o1-preview, o1-mini).\n"
+        "/search `<truy vấn>` - Tìm kiếm trên Google và gửi kết quả đến mô hình AI.\n"
+        "/web `<url>` - Thu thập dữ liệu từ trang web và gửi đến mô hình AI.\n"
+        "/generate `<gợi ý>` - Tạo hình ảnh từ gợi ý văn bản.\n"
+        "/reset - Đặt lại lịch sử trò chuyện của bạn.\n"
+        "/help - Hiển thị tin nhắn trợ giúp này.\n"
+    )
+    await interaction.response.send_message(help_message, ephemeral=True)
 
 # Function to check if the bot should respond to a message
 def should_respond_to_message(message: discord.Message) -> bool:
