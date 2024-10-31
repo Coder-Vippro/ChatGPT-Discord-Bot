@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 import logging
 import sys
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 import aiohttp
 from runware import Runware, IImageInference
 from collections import defaultdict
@@ -534,6 +534,11 @@ async def handle_user_message(message: discord.Message):
         save_history(user_id, history)
 
         await send_response(message.channel, reply)
+
+    except RateLimitError as e:
+        error_message = "Error: Rate limit exceeded for o1-preview or o1-mini. Please try again later or use /choose_model to change to gpt-4o."
+        logging.error(f"Rate limit error: {error_message}")
+        await message.channel.send(error_message)
 
     except Exception as e:
         error_message = f"Error: {str(e)}"
