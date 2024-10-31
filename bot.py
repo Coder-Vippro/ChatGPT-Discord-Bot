@@ -185,7 +185,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 # Bot initialization
-bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=80)
+bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=120)
 tree = bot.tree  # For slash commands
 
 # Function to perform a Google search and return results
