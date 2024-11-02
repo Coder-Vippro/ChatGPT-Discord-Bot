@@ -15,7 +15,6 @@ from collections import defaultdict
 import asyncio
 from PIL import Image
 from io import BytesIO
-import PyPDF2
 from dotenv import load_dotenv
 load_dotenv()
 
