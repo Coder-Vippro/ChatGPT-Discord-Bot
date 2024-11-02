@@ -15,6 +15,7 @@ from collections import defaultdict
 import asyncio
 from PIL import Image
 from io import BytesIO
+import PyPDF2
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -395,11 +396,14 @@ async def reset(interaction: discord.Interaction):
     
     # Delete user data based on their user_id
     cursor.execute('DELETE FROM user_histories WHERE user_id = ?', (user_id,))
+    
+    # Recreate an empty history to avoid issues
+    cursor.execute('INSERT INTO user_histories (user_id, history) VALUES (?, ?)', (user_id, '[]'))
+    
     conn.commit()
     conn.close()
     
-    await interaction.response.send_message("Your data has been cleared!", ephemeral=True)
-
+    await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
 async def help_command(interaction: discord.Interaction):
@@ -461,87 +465,119 @@ async def handle_user_message(message: discord.Message):
     model = get_user_model(user_id)
 
     # Supported text/code file extensions
-    supported_file_types = [".txt", ".json", ".py", ".cpp", ".js", ".html", ".css", ".xml", ".md", ".java", ".cs"]
+    supported_file_types = [
+        ".txt", ".json", ".py", ".cpp", ".js", ".html",
+        ".css", ".xml", ".md", ".java", ".cs"
+    ]
 
-    # Check if there's an attachment and handle various file types
+    # Initialize content list for the current message
+    content = []
+
+    # Add message content if present
+    if message.content:
+        content.append({"type": "text", "text": message.content})
+
+    # Process attachments if any
+    image_urls = []
     if message.attachments:
-        attachment = message.attachments[0]
-        
-        # Check if it's a text file before trying to decode
-        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
-            file_content = await attachment.read()
-            try:
-                user_message_content = file_content.decode("utf-8")
-                # Handle text file content...
-                if attachment.filename == "message.txt":
-                    user_message_text = user_message_content
-                else:
-                    user_message_text = f"{message.content}\n\n{user_message_content}" if message.content else user_message_content
-            except UnicodeDecodeError:
-                await message.channel.send("Error: The file appears to be binary data, not a text file.")
-                return
-        else:
-            # Handle non-text files (like images)
-            user_message_text = message.content if message.content else "Here's an image."
-    else:
-        # Regular text message if no attachment is present
-        user_message_text = message.content
+        attachments = message.attachments
+        for attachment in attachments:
+            if any(attachment.filename.endswith(ext) for ext in supported_file_types):
+                file_content = await attachment.read()
+                try:
+                    user_message_content = file_content.decode("utf-8")
+                    content.append({"type": "text", "text": user_message_content})
+                except UnicodeDecodeError:
+                    await message.channel.send("Error: The file appears to be binary data, not a text file.")
+                    return
+            else:
+                image_urls.append(attachment.url)
+
+    # If no content was added, add a default message
+    if not content and not image_urls:
+        content.append({"type": "text", "text": "No content."})
+
+    # Prepare the current message
+    current_message = {"role": "user", "content": content}
 
     # Check model and adjust behavior
     if model in ["o1-mini", "o1-preview"]:
         # Disable image support and system prompt
-        history.append({"role": "user", "content": user_message_text})  # Just store the user message
+        user_message_text = message.content if message.content else "No content."
+        history.append({"role": "user", "content": user_message_text})
     else:
-        # Process image attachments if they exist and aren't text/code files
-        if message.attachments and not any(attachment.filename.endswith(ext) for ext in supported_file_types):
-            image_url = message.attachments[0].url
-            if user_message_text:
-                history.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_message_text},
-                        {"type": "image_url", "image_url": {"url": image_url}}
-                    ]
-                })
-            else:
-                history.append({
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Here's an image."},
-                        {"type": "image_url", "image_url": {"url": image_url}}
-                    ]
-                })
+        # Remove previous image messages
+        history = [
+            msg for msg in history
+            if not (
+                msg["role"] == "user" and
+                isinstance(msg["content"], list) and
+                any(part["type"] == "image_url" for part in msg["content"])
+            )
+        ]
+        if image_urls:
+            current_message = {"role": "user", "content": content + [
+                {"type": "image_url", "image_url": {"url": url}} for url in image_urls
+            ]}
+            history.append(current_message)
         else:
             history.append({"role": "user", "content": user_message_text})
 
     # Trim history before sending to OpenAI
     trim_history(history)
 
+    # Create a history without images for saving
+    history_to_save = []
+    for msg in history:
+        if msg["role"] == "user" and isinstance(msg["content"], list):
+            text_parts = [part["text"] for part in msg["content"] if part["type"] == "text"]
+            text_content = "\n".join(text_parts)
+            history_to_save.append({"role": "user", "content": text_content})
+        else:
+            history_to_save.append(msg)
+
+    # Prepare messages to send to OpenAI API
+    messages_to_send = history_to_save.copy()
+
+    if model not in ["o1-mini", "o1-preview"] and image_urls:
+        latest_images = [
+            {
+                "type": "image_url",
+                "image_url": {"url": url}
+            }
+            for url in image_urls
+        ]
+        messages_to_send.append({
+            "role": "user",
+            "content": latest_images
+        })
+
     try:
-        # Check if the system prompt should be included based on the model
         if model in ["o1-mini", "o1-preview"]:
-            # Skip the system prompt
             response = client.chat.completions.create(
                 model=model,
-                messages=history[1:]  # Skip system prompt
+                messages=history[1:]
             )
         else:
             response = client.chat.completions.create(
                 model=model,
-                messages=history,
+                messages=messages_to_send,
                 temperature=0.3,
                 max_tokens=4096,
                 top_p=0.7,
             )
 
         reply = response.choices[0].message.content
-        history.append({"role": "assistant", "content": reply})
-        save_history(user_id, history)
+        history_to_save.append({"role": "assistant", "content": reply})
+        save_history(user_id, history_to_save)
 
         await send_response(message.channel, reply)
 
-    except RateLimitError as e:
-        error_message = "Error: Rate limit exceeded for o1-preview or o1-mini. Please try again later or use /choose_model to change to gpt-4o."
+    except RateLimitError:
+        error_message = (
+            "Error: Rate limit exceeded for o1-preview or o1-mini. "
+            "Please try again later or use /choose_model to change to gpt-4o."
+        )
         logging.error(f"Rate limit error: {error_message}")
         await message.channel.send(error_message)
 
@@ -565,7 +601,10 @@ async def send_response(channel: discord.TextChannel, reply: str):
     if len(reply) > 2000:
         with open("response.txt", "w") as file:
             file.write(reply)
-        await channel.send("The response was too long, so it has been saved to a file.", file=discord.File("response.txt"))
+        await channel.send(
+            "The response was too long, so it has been saved to a file.",
+            file=discord.File("response.txt")
+        )
     else:
         await channel.send(reply)
 
