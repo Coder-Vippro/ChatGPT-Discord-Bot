@@ -8,7 +8,8 @@ WORKDIR /usr/src/discordbot
 COPY requirements.txt ./
 
 # Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt && apt-get update && apt-get install -y sqlite3
 
 # Copy the rest of the application source code
 COPY . .

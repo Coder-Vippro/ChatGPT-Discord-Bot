@@ -466,18 +466,23 @@ async def handle_user_message(message: discord.Message):
     # Check if there's an attachment and handle various file types
     if message.attachments:
         attachment = message.attachments[0]
-        file_content = await attachment.read()
-        user_message_content = file_content.decode("utf-8")
-
-        # If file is `message.txt`, use it directly as the user message without a prompt
-        if attachment.filename == "message.txt":
-            user_message_text = user_message_content
+        
+        # Check if it's a text file before trying to decode
+        if any(attachment.filename.endswith(ext) for ext in supported_file_types):
+            file_content = await attachment.read()
+            try:
+                user_message_content = file_content.decode("utf-8")
+                # Handle text file content...
+                if attachment.filename == "message.txt":
+                    user_message_text = user_message_content
+                else:
+                    user_message_text = f"{message.content}\n\n{user_message_content}" if message.content else user_message_content
+            except UnicodeDecodeError:
+                await message.channel.send("Error: The file appears to be binary data, not a text file.")
+                return
         else:
-            # Otherwise, structure with an optional user prompt
-            if message.content:
-                user_message_text = f"{message.content}\n\n{user_message_content}"
-            else:
-                user_message_text = user_message_content
+            # Handle non-text files (like images)
+            user_message_text = message.content if message.content else "Here's an image."
     else:
         # Regular text message if no attachment is present
         user_message_text = message.content
@@ -526,7 +531,7 @@ async def handle_user_message(message: discord.Message):
                 messages=history,
                 temperature=0.3,
                 max_tokens=4096,
-                top_p=0.7
+                top_p=0.7,
             )
 
         reply = response.choices[0].message.content
