@@ -158,7 +158,7 @@ def get_user_model(user_id):
     cursor.execute('SELECT model FROM user_preferences WHERE user_id = ?', (user_id,))
     result = cursor.fetchone()
     conn.close()
-    return result[0] if result else "gpt-4o-mini"  # Default to "gpt-4o" if no preference
+    return result[0] if result else "gpt-4o"  # Default to "gpt-4o" if no preference
 
 # New function to save the user's model preference
 def save_user_model(user_id, model):
