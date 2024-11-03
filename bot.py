@@ -245,6 +245,7 @@ def scrape_web_content(url: str) -> str:
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
+
 # Processes a command request with rate limiting and queuing.
 async def process_request(interaction, command_func, *args):
     user_id = interaction.user.id
@@ -425,6 +426,7 @@ async def help_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(help_message, ephemeral=True)
 
+
 # Function to check if the bot should respond to a message
 def should_respond_to_message(message: discord.Message) -> bool:
     """Checks if the bot should respond to the message."""
@@ -466,8 +468,20 @@ async def handle_user_message(message: discord.Message):
     # Supported text/code file extensions
     supported_file_types = [
         ".txt", ".json", ".py", ".cpp", ".js", ".html",
-        ".css", ".xml", ".md", ".java", ".cs"
+        ".css", ".xml", ".md", ".java", ".cs",
+        ".rb", ".go", ".ts", ".swift", ".kt",
+        ".php", ".sh", ".bat", ".pl", ".r",
+        ".sql", ".yaml", ".yml", ".ini", ".cfg",
+        ".tex", ".csv", ".log", ".lua", ".scala",
+        ".hs", ".erl", ".ex", ".clj", ".jsx",
+        ".tsx", ".vue", ".svelte", ".dart", ".m",
+        ".groovy", ".ps1", ".vb", ".asp", ".aspx",
+        ".jsp", ".dart", ".coffee", ".nim", ".vala",
+        ".fish", ".zsh", ".csh", ".tcsh", ".mk",
+        ".make", ".Dockerfile", ".env", ".graphql",
+        ".twig", ".hbs", ".liquid"
     ]
+
 
     # Initialize content list for the current message
     content = []
@@ -478,6 +492,7 @@ async def handle_user_message(message: discord.Message):
 
     # Process attachments if any
     image_urls = []
+    file_contents = []
     if message.attachments:
         attachments = message.attachments
         for attachment in attachments:
@@ -485,6 +500,7 @@ async def handle_user_message(message: discord.Message):
                 file_content = await attachment.read()
                 try:
                     user_message_content = file_content.decode("utf-8")
+                    file_contents.append(user_message_content)
                     content.append({"type": "text", "text": user_message_content})
                 except UnicodeDecodeError:
                     await message.channel.send("Error: The file appears to be binary data, not a text file.")
@@ -502,7 +518,10 @@ async def handle_user_message(message: discord.Message):
     # Check model and adjust behavior
     if model in ["o1-mini", "o1-preview"]:
         # Disable image support and system prompt
-        user_message_text = message.content if message.content else "No content."
+        user_message_text = message.content
+        if file_contents:
+            user_message_text += "\n" + "\n".join(file_contents)
+        user_message_text = user_message_text if user_message_text else "No content."
         history.append({"role": "user", "content": user_message_text})
     else:
         # Remove previous image messages
@@ -520,6 +539,10 @@ async def handle_user_message(message: discord.Message):
             ]}
             history.append(current_message)
         else:
+            user_message_text = message.content
+            if file_contents:
+                user_message_text += "\n" + "\n".join(file_contents)
+            user_message_text = user_message_text if user_message_text else "No content."
             history.append({"role": "user", "content": user_message_text})
 
     # Trim history before sending to OpenAI
@@ -548,7 +571,7 @@ async def handle_user_message(message: discord.Message):
         ]
         messages_to_send.append({
             "role": "user",
-            "content": latest_images
+            "content": content + latest_images
         })
 
     try:
