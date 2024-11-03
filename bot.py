@@ -381,7 +381,7 @@ async def web(interaction: discord.Interaction, url: str):
         history.append({"role": "assistant", "content": reply})
         save_history(user_id, history)
 
-        await send_response(interaction, reply)
+        await interaction.followup.send(reply)
 
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
