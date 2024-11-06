@@ -576,9 +576,10 @@ async def handle_user_message(message: discord.Message):
 
     try:
         if model in ["o1-mini", "o1-preview"]:
+            messages_to_send = history[1:] if len(history) > 1 else history
             response = client.chat.completions.create(
                 model=model,
-                messages=history[1:]
+                messages=messages_to_send
             )
         else:
             response = client.chat.completions.create(
