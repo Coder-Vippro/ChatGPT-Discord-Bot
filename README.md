@@ -26,6 +26,7 @@ To get started, ensure you have:
 - OpenAI API Key
 - Runware API Key ([Get yours at Runware](https://runware.ai/))
 - Google API Key and Custom Search Engine ID (CX)
+- Mongodb url: Get from https://cloud.mongodb.com/
 
 ## Setup
 
@@ -40,6 +41,7 @@ To get started, ensure you have:
      GOOGLE_API_KEY=your_google_api_key
      GOOGLE_CX=your_google_cx
      OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
+     MONGODB_URI=mongodb://localhost:27017/
      ```
    - Use the following `docker-compose.yml`:
      ```yaml
@@ -71,6 +73,7 @@ To get started, ensure you have:
      GOOGLE_API_KEY=your_google_api_key
      GOOGLE_CX=your_google_cx
      OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
+     MONGODB_URI=mongodb://localhost:27017/
      ```
    - Install the dependencies:
      ```bash
@@ -115,7 +118,7 @@ Once the bot is running, it connects to Discord using credentials from `.env`. C
 - **Generate Image**: `/generate prompt: "A futuristic cityscape"`
 - **Scrape Web Content**: `/web url: "https://example.com"`
 - **Search Google**: `/search prompt: "latest news in Vietnam"`
-
+- **Normal chat**: `Ping the bot with a question or send a dms to the bot to start`
 
 ## CI/CD
 
