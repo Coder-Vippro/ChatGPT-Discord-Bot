@@ -105,4 +105,5 @@ jobs:
             -e GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }} \
             -e GOOGLE_CX=${{ secrets.GOOGLE_CX }} \
             -e OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }} \
+            -e MONGODB_URI=${{ secrets.MONGODB_URI }} \
             $IMAGE_NAME:$IMAGE_TAG
