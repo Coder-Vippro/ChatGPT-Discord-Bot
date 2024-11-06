@@ -93,17 +93,19 @@ jobs:
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
-          
+
           # Pull the latest image from GHCR
+          
           docker pull $IMAGE_NAME:$IMAGE_TAG
-      
-          # Run the new container with the latest image
+
+          # Run the new container with the latest image and pass in environment variables securely
+
           docker run -d --name chatgpt-discord-bot \
-            -e DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }} \
-            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
-            -e RUNWARE_API_KEY=${{ secrets.RUNWARE_API_KEY }} \
-            -e GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }} \
-            -e GOOGLE_CX=${{ secrets.GOOGLE_CX }} \
-            -e OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }} \
-            
+            -e DISCORD_TOKEN="${{ secrets.DISCORD_TOKEN }}" \
+            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            -e RUNWARE_API_KEY="${{ secrets.RUNWARE_API_KEY }}" \
+            -e GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
+            -e GOOGLE_CX="${{ secrets.GOOGLE_CX }}" \
+            -e OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL }}" \
+            -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
             $IMAGE_NAME:$IMAGE_TAG
