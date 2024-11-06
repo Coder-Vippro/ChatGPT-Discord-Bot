@@ -1,3 +1,4 @@
 test.py
 .env
 chat_history.db
+bot_copy.py

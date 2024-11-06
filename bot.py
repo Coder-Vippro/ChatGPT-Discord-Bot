@@ -1,7 +1,7 @@
 import os
 import discord
 import io
-import sqlite3
+import pymongo
 from discord.ext import commands, tasks
 from discord import app_commands
 import requests
@@ -16,6 +16,7 @@ import asyncio
 from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
+from pymongo import MongoClient
 load_dotenv()
 
 # OpenAI client initialization
@@ -99,8 +100,15 @@ GOOGLE_CX = str(os.getenv("GOOGLE_CX"))  # Search Engine ID
 # Runware API key
 RUNWARE_API_KEY = str(os.getenv("RUNWARE_API_KEY"))
 
+#MongoDB URI
+MONGODB_URI = str(os.getenv("MONGODB_URI"))
+
 # Initialize Runware SDK
 runware = Runware(api_key=RUNWARE_API_KEY)
+
+# MongoDB client initialization
+mongo_client = MongoClient(MONGODB_URI)
+db = mongo_client['chatgpt_discord_bot']  # Database name
 
 # Dictionary to keep track of user requests and their cooldowns
 user_requests = defaultdict(lambda: {'last_request': 0, 'queue': asyncio.Queue()})
@@ -112,73 +120,36 @@ user_histories = {}
 TOKEN = str(os.getenv("DISCORD_TOKEN"))
 
 # --- Database functions ---
-def create_tables():
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_histories (
-            user_id INTEGER PRIMARY KEY,
-            history TEXT NOT NULL
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_preferences (
-            user_id INTEGER PRIMARY KEY,
-            model TEXT NOT NULL
-        )
-    ''')
-    conn.commit()
-    conn.close()
 
 def get_history(user_id):
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT history FROM user_histories WHERE user_id = ?', (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    if result:
-        return eval(result[0])
-    return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
-
+    user_data = db.user_histories.find_one({'user_id': user_id})
+    if user_data and 'history' in user_data:
+        return user_data['history']
+    else:
+        return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
+    
 def save_history(user_id, history):
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO user_histories (user_id, history)
-        VALUES (?, ?)
-    ''', (user_id, str(history)))
-    conn.commit()
-    conn.close()
+    db.user_histories.update_one(
+        {'user_id': user_id},
+        {'$set': {'history': history}},
+        upsert=True
+    )
 
 # New function to get the user's model preference
 def get_user_model(user_id):
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT model FROM user_preferences WHERE user_id = ?', (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else "gpt-4o"  # Default to "gpt-4o" if no preference
-
-# New function to save the user's model preference
-def save_user_model(user_id, model):
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT OR REPLACE INTO user_preferences (user_id, model)
-        VALUES (?, ?)
-    ''', (user_id, model))
-    conn.commit()
-    conn.close()
-
-def initialize_db():
-    db_file = 'chat_history.db'
-    if not os.path.exists(db_file):
-        print(f"{db_file} not found. Creating tables...")
-        create_tables()
+    user_pref = db.user_preferences.find_one({'user_id': user_id})
+    if user_pref and 'model' in user_pref:
+        return user_pref['model']
     else:
-        print(f"{db_file} found. No need to create tables.")
+        return "gpt-4o"  # Default to "gpt-4o" if no preference
 
-initialize_db() # Initialize the database
+def save_user_model(user_id, model):
+    db.user_preferences.update_one(
+        {'user_id': user_id},
+        {'$set': {'model': model}},
+        upsert=True
+    )
+
 
 # Intents and bot initialization
 intents = discord.Intents.default()
@@ -390,18 +361,9 @@ async def web(interaction: discord.Interaction, url: str):
 @tree.command(name="reset", description="Reset the bot by clearing user data.")
 async def reset(interaction: discord.Interaction):
     """Resets the bot by clearing user data."""
-    user_id = interaction.user.id  # Get the user ID of the person who invoked the command
-    conn = sqlite3.connect('chat_history.db')
-    cursor = conn.cursor()
-    
-    # Delete user data based on their user_id
-    cursor.execute('DELETE FROM user_histories WHERE user_id = ?', (user_id,))
-    
-    # Recreate an empty history to avoid issues
-    cursor.execute('INSERT INTO user_histories (user_id, history) VALUES (?, ?)', (user_id, '[]'))
-    
-    conn.commit()
-    conn.close()
+    user_id = interaction.user.id
+    db.user_histories.delete_one({'user_id': user_id})
+    await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
     
     await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
 # Slash command for help (/help)

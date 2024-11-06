@@ -6,3 +6,4 @@ aiohttp
 runware             
 Pillow              
 discord.py
+pymongo
