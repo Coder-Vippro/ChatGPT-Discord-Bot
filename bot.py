@@ -364,8 +364,8 @@ async def reset(interaction: discord.Interaction):
     user_id = interaction.user.id
     db.user_histories.delete_one({'user_id': user_id})
     await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
-    
-    await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
+
+
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
 async def help_command(interaction: discord.Interaction):
@@ -422,10 +422,16 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
 
 async def handle_user_message(message: discord.Message):
-    """Processes user messages and generates responses."""
     user_id = message.author.id
     history = get_history(user_id)
     model = get_user_model(user_id)
+
+    # Initialize content list for the current message
+    content = []
+
+    # Add message content if present
+    if message.content:
+        content.append({"type": "text", "text": message.content})
 
     # Supported text/code file extensions
     supported_file_types = [
@@ -444,17 +450,8 @@ async def handle_user_message(message: discord.Message):
         ".twig", ".hbs", ".liquid"
     ]
 
-
-    # Initialize content list for the current message
-    content = []
-
-    # Add message content if present
-    if message.content:
-        content.append({"type": "text", "text": message.content})
-
     # Process attachments if any
     image_urls = []
-    file_contents = []
     if message.attachments:
         attachments = message.attachments
         for attachment in attachments:
@@ -462,7 +459,6 @@ async def handle_user_message(message: discord.Message):
                 file_content = await attachment.read()
                 try:
                     user_message_content = file_content.decode("utf-8")
-                    file_contents.append(user_message_content)
                     content.append({"type": "text", "text": user_message_content})
                 except UnicodeDecodeError:
                     await message.channel.send("Error: The file appears to be binary data, not a text file.")
@@ -483,48 +479,89 @@ async def handle_user_message(message: discord.Message):
     # Trim history before sending to OpenAI
     trim_history(history)
 
-    # Function to get last N images from history
-    def get_last_n_images(history, n=10):
-        images = []
-        for msg in reversed(history):
-            if msg["role"] == "user" and isinstance(msg["content"], list):
-                for part in reversed(msg["content"]):
-                    if part["type"] == "image_url":
-                        images.append(part)
-                        if len(images) == n:
-                            return images[::-1]  # Reverse to maintain order
-        return images[::-1]
-
-    # Get the last 10 images
-    latest_images = get_last_n_images(history, n=10)
-
     # Prepare messages to send to API
     messages_to_send = history.copy()
 
-    # Include the latest images in the last message
-    if latest_images:
-        # Remove existing images from the last message
-        last_message = messages_to_send[-1]
-        if last_message["role"] == "user" and isinstance(last_message["content"], list):
-            last_message["content"] = [
-                part for part in last_message["content"] if part["type"] != "image_url"
-            ]
-            last_message["content"].extend(latest_images)
-        else:
-            # Ensure content is a list
-            last_message["content"] = [{"type": "text", "text": last_message["content"]}]
-            last_message["content"].extend(latest_images)
-        messages_to_send[-1] = last_message
-    
+    if model in ["gpt-4o", "gpt-4o-mini"]:
+        # Include up to 10 previous images
+        def get_last_n_images(history, n=10):
+            images = []
+            for msg in reversed(history):
+                if msg["role"] == "user" and isinstance(msg["content"], list):
+                    for part in reversed(msg["content"]):
+                        if part["type"] == "image_url":
+                            images.append(part)
+                            if len(images) == n:
+                                return images[::-1]  # Reverse to maintain order
+            return images[::-1]
+
+        # Get the last 10 images
+        latest_images = get_last_n_images(history, n=10)
+
+        if latest_images:
+            # Remove existing images from the last message
+            last_message = messages_to_send[-1]
+            if last_message["role"] == "user" and isinstance(last_message["content"], list):
+                last_message["content"] = [
+                    part for part in last_message["content"] if part["type"] != "image_url"
+                ]
+                last_message["content"].extend(latest_images)
+            else:
+                # Ensure content is a list
+                last_message["content"] = [{"type": "text", "text": last_message["content"]}]
+                last_message["content"].extend(latest_images)
+            messages_to_send[-1] = last_message
+
+        # Fix the 431 error by limiting the number of images
+        max_images = 5  # Adjust the limit as needed
+        total_images = 0
+        for msg in messages_to_send:
+            if msg["role"] == "user" and isinstance(msg["content"], list):
+                image_parts = [part for part in msg["content"] if part.get("type") == "image_url"]
+                total_images += len(image_parts)
+        if total_images > max_images:
+            # Remove older images to keep total_images <= max_images
+            images_removed = 0
+            for msg in messages_to_send:
+                if msg["role"] == "user" and isinstance(msg["content"], list):
+                    new_content = []
+                    for part in msg["content"]:
+                        if part.get("type") == "image_url" and images_removed < (total_images - max_images):
+                            images_removed += 1
+                            continue  # Skip this image
+                        new_content.append(part)
+                    msg["content"] = new_content
+
+    else:
+        # Exclude image URLs and system prompts for 'o1' model family
+        # Remove 'image_url' content from messages
+        for msg in messages_to_send:
+            if msg["role"] == "user" and isinstance(msg["content"], list):
+                msg["content"] = [
+                    part for part in msg["content"] if part.get("type") != "image_url"
+                ]
+        # Remove system prompts from messages
+        messages_to_send = [
+            msg for msg in messages_to_send if msg.get("role") != "system"
+        ]
+
     try:
+        # Prepare API call parameters
+        api_params = {
+            "model": model,
+            "messages": messages_to_send,
+        }
+
+        if model in ["gpt-4o", "gpt-4o-mini"]:
+            # Include parameters for 'gpt-4o' models
+            api_params.update({
+                "temperature": 0.3,
+                "max_tokens": 4096,
+                "top_p": 0.7,
+            })
+
         # Send messages to the API
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages_to_send,
-            temperature=0.3,
-            max_tokens=4096,
-            top_p=0.7,
-        )
+        response = client.chat.completions.create(**api_params)
 
         reply = response.choices[0].message.content
         history.append({"role": "assistant", "content": reply})
@@ -624,7 +661,9 @@ async def on_ready():
     """Bot startup event to sync slash commands and start status loop."""
     await tree.sync()  # Sync slash commands
     print(f"Logged in as {bot.user}")
-    change_status.start()  # Start the status changing loop
+
+# Start the status changing loop      
+change_status.start()
 
 # Main bot startup
 if __name__ == "__main__":
