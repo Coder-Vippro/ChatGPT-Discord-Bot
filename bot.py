@@ -469,6 +469,8 @@ async def handle_user_message(message: discord.Message):
                     return
             else:
                 image_urls.append(attachment.url)
+                # Add image URLs to content
+                content.append({"type": "image_url", "image_url": {"url": attachment.url}})
 
     # If no content was added, add a default message
     if not content and not image_urls:
@@ -476,85 +478,57 @@ async def handle_user_message(message: discord.Message):
 
     # Prepare the current message
     current_message = {"role": "user", "content": content}
-
-    # Check model and adjust behavior
-    if model in ["o1-mini", "o1-preview"]:
-        # Disable image support and system prompt
-        user_message_text = message.content
-        if file_contents:
-            user_message_text += "\n" + "\n".join(file_contents)
-        user_message_text = user_message_text if user_message_text else "No content."
-        history.append({"role": "user", "content": user_message_text})
-    else:
-        # Remove previous image messages
-        history = [
-            msg for msg in history
-            if not (
-                msg["role"] == "user" and
-                isinstance(msg["content"], list) and
-                any(part["type"] == "image_url" for part in msg["content"])
-            )
-        ]
-        if image_urls:
-            current_message = {"role": "user", "content": content + [
-                {"type": "image_url", "image_url": {"url": url}} for url in image_urls
-            ]}
-            history.append(current_message)
-        else:
-            user_message_text = message.content
-            if file_contents:
-                user_message_text += "\n" + "\n".join(file_contents)
-            user_message_text = user_message_text if user_message_text else "No content."
-            history.append({"role": "user", "content": user_message_text})
+    history.append(current_message)
 
     # Trim history before sending to OpenAI
     trim_history(history)
 
-    # Create a history without images for saving
-    history_to_save = []
-    for msg in history:
-        if msg["role"] == "user" and isinstance(msg["content"], list):
-            text_parts = [part["text"] for part in msg["content"] if part["type"] == "text"]
-            text_content = "\n".join(text_parts)
-            history_to_save.append({"role": "user", "content": text_content})
+    # Function to get last N images from history
+    def get_last_n_images(history, n=10):
+        images = []
+        for msg in reversed(history):
+            if msg["role"] == "user" and isinstance(msg["content"], list):
+                for part in reversed(msg["content"]):
+                    if part["type"] == "image_url":
+                        images.append(part)
+                        if len(images) == n:
+                            return images[::-1]  # Reverse to maintain order
+        return images[::-1]
+
+    # Get the last 10 images
+    latest_images = get_last_n_images(history, n=10)
+
+    # Prepare messages to send to API
+    messages_to_send = history.copy()
+
+    # Include the latest images in the last message
+    if latest_images:
+        # Remove existing images from the last message
+        last_message = messages_to_send[-1]
+        if last_message["role"] == "user" and isinstance(last_message["content"], list):
+            last_message["content"] = [
+                part for part in last_message["content"] if part["type"] != "image_url"
+            ]
+            last_message["content"].extend(latest_images)
         else:
-            history_to_save.append(msg)
-
-    # Prepare messages to send to OpenAI API
-    messages_to_send = history_to_save.copy()
-
-    if model not in ["o1-mini", "o1-preview"] and image_urls:
-        latest_images = [
-            {
-                "type": "image_url",
-                "image_url": {"url": url}
-            }
-            for url in image_urls
-        ]
-        messages_to_send.append({
-            "role": "user",
-            "content": content + latest_images
-        })
-
+            # Ensure content is a list
+            last_message["content"] = [{"type": "text", "text": last_message["content"]}]
+            last_message["content"].extend(latest_images)
+        messages_to_send[-1] = last_message
+    
     try:
-        if model in ["o1-mini", "o1-preview"]:
-            messages_to_send = history[1:] if len(history) > 1 else history
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages_to_send
-            )
-        else:
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages_to_send,
-                temperature=0.3,
-                max_tokens=4096,
-                top_p=0.7,
-            )
+        # Send messages to the API
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages_to_send,
+            temperature=0.3,
+            max_tokens=4096,
+            top_p=0.7,
+        )
 
         reply = response.choices[0].message.content
-        history_to_save.append({"role": "assistant", "content": reply})
-        save_history(user_id, history_to_save)
+        history.append({"role": "assistant", "content": reply})
+        save_history(user_id, history)
 
         await send_response(message.channel, reply)
 
