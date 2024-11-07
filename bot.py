@@ -661,9 +661,7 @@ async def on_ready():
     """Bot startup event to sync slash commands and start status loop."""
     await tree.sync()  # Sync slash commands
     print(f"Logged in as {bot.user}")
-
-# Start the status changing loop      
-change_status.start()
+    change_status.start() # Start the status changing loop   
 
 # Main bot startup
 if __name__ == "__main__":
