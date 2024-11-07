@@ -1,5 +1,5 @@
 # Use an official Python runtime as a parent image
-FROM python:3.12.6-slim
+FROM python:3.11.10-slim
 
 # Set the working directory in the container
 WORKDIR /usr/src/discordbot
