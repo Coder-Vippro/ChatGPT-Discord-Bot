@@ -513,7 +513,7 @@ async def handle_user_message(message: discord.Message):
             messages_to_send[-1] = last_message
 
         # Fix the 431 error by limiting the number of images
-        max_images = 5  # Adjust the limit as needed
+        max_images = 10  # Adjust the limit as needed
         total_images = 0
         for msg in messages_to_send:
             if msg["role"] == "user" and isinstance(msg["content"], list):
@@ -571,8 +571,8 @@ async def handle_user_message(message: discord.Message):
 
     except RateLimitError:
         error_message = (
-            "Error: Rate limit exceeded for o1-preview or o1-mini. "
-            "Please try again later or use /choose_model to change to gpt-4o."
+            "Error: Rate limit exceeded for your model"
+            "Please try again later or use /choose_model to change to any models else."
         )
         logging.error(f"Rate limit error: {error_message}")
         await message.channel.send(error_message)
