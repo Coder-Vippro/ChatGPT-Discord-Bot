@@ -1,7 +1,7 @@
 discord.py         
 requests            
 beautifulsoup4     
-openai==1.47.0            
+openai        
 aiohttp             
 runware             
 Pillow              
