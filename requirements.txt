@@ -7,3 +7,4 @@ runware
 Pillow              
 discord.py
 pymongo
+flask

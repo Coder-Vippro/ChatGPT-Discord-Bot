@@ -17,7 +17,21 @@ from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
 from pymongo import MongoClient
+from flask import Flask
+import threading
 load_dotenv()
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def start_health_server():
+    app.run(host='0.0.0.0', port=9123)
+
+# Start health server in a separate thread
+threading.Thread(target=start_health_server, daemon=True).start()
 
 # OpenAI client initialization
 client = OpenAI(
