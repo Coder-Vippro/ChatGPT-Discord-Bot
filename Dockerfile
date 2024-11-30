@@ -14,10 +14,11 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose port for health check
-EXPOSE 9123
+EXPOSE 5000
 
-# Health check command
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:9123/health || exit 1
+# Add health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl --fail http://localhost:5000/health || exit 1
 
 # Copy the rest of the application source code
 COPY . .

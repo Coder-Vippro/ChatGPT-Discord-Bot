@@ -17,21 +17,32 @@ from PIL import Image
 from io import BytesIO
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from flask import Flask
+from flask import Flask, jsonify
 import threading
 load_dotenv()
 
+# Flask app for health-check
 app = Flask(__name__)
 
-@app.route('/health')
+# Health-check endpoint
+@app.route('/health', methods=['GET'])
 def health():
-    return "OK", 200
+    """
+    Checks if the bot is ready and connected to Discord.
+    """
+    if bot.is_closed():  # Bot is disconnected
+        return jsonify(status="unhealthy", error="Bot is disconnected"), 500
+    elif not bot.is_ready():  # Bot is not ready yet
+        return jsonify(status="unhealthy", error="Bot is not ready"), 500
+    else:
+        return jsonify(status="healthy"), 200
 
-def start_health_server():
-    app.run(host='0.0.0.0', port=9123)
-
-# Start health server in a separate thread
-threading.Thread(target=start_health_server, daemon=True).start()
+# Run Flask server in a separate thread
+def run_flask():
+    """
+    Starts the Flask server.
+    """
+    app.run(host="0.0.0.0", port=5000)
 
 # OpenAI client initialization
 client = OpenAI(
