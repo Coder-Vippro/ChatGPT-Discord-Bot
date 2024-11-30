@@ -688,6 +688,11 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     change_status.start() # Start the status changing loop   
 
+# Start Flask in a separate thread
+flask_thread = threading.Thread(target=run_flask)
+flask_thread.daemon = True  # Ensure it closes when the main program exits
+flask_thread.start()
+
 # Main bot startup
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
