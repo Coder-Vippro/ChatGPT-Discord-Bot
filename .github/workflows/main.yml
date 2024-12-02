@@ -6,7 +6,8 @@ on:
       - main
 
 jobs:
-  test:
+  # Run unit tests for the project
+  tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -38,7 +39,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest 
     environment: Private Server Deploy
-    needs: test  # This job depends on the CI job
+    needs: tests  # This job depends on the CI job
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -65,39 +66,47 @@ jobs:
   # Deploy from GHCR to the main server
   deploy:
     runs-on: self-hosted
-    environment: Private Server Deploy
-    needs: build-and-push
+    environment: Private Server Deploy  # Specify the deployment environment
+    needs: build-and-push  # This job depends on the GHCR push job
     steps:
-      - name: Generate Kubernetes Secret YAML
-        env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RUNWARE_API_KEY: ${{ secrets.RUNWARE_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_CX: ${{ secrets.GOOGLE_CX }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      # Step 1: Log in to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 2: Stop and remove the previous running container
+      - name: Remove old running container
         run: |
-          cat <<EOF > bot-secrets.yaml
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: bot-secrets
-          type: Opaque
-          stringData:
-            DISCORD_TOKEN: "$DISCORD_TOKEN"
-            OPENAI_API_KEY: "$OPENAI_API_KEY"
-            RUNWARE_API_KEY: "$RUNWARE_API_KEY"
-            GOOGLE_API_KEY: "$GOOGLE_API_KEY"
-            GOOGLE_CX: "$GOOGLE_CX"
-            OPENAI_BASE_URL: "$OPENAI_BASE_URL"
-            MONGODB_URI: "$MONGODB_URI"
-          EOF
-      
-      - name: Apply Kubernetes Secret
+          docker rm -f chatgpt-discord-bot || true
+
+      # Step 3: Remove the old image
+      - name: Remove old image
         run: |
-          kubectl apply -f bot-secrets.yaml
-      
-      - name: Apply Kubernetes manifests
+          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
+          IMAGE_TAG=latest
+          docker rmi $IMAGE_NAME:$IMAGE_TAG || true
+
+      # Step 4: Pull and Run Docker container from GHCR
+      - name: Pull and Run Docker container from GHCR
         run: |
-          kubectl apply -f /home/vps/actions-runner/chatgpt-discord-bot/k3s/chatgpt-discord-bot-deployment.yaml
+          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
+          IMAGE_TAG=latest
+
+          # Pull the latest image from GHCR
+          
+          docker pull $IMAGE_NAME:$IMAGE_TAG
+
+          # Run the new container with the latest image and pass in environment variables securely
+
+          docker run -d --name chatgpt-discord-bot \
+            -e DISCORD_TOKEN="${{ secrets.DISCORD_TOKEN }}" \
+            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            -e RUNWARE_API_KEY="${{ secrets.RUNWARE_API_KEY }}" \
+            -e GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
+            -e GOOGLE_CX="${{ secrets.GOOGLE_CX }}" \
+            -e OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL }}" \
+            -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            $IMAGE_NAME:$IMAGE_TAG
