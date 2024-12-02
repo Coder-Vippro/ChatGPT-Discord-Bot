@@ -83,14 +83,24 @@ jobs:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
         run: |
           kubectl delete secret bot-secrets || true
+
+          # Encode secrets as Base64
+          echo -n "$DISCORD_TOKEN" | base64 > discord_token_b64.txt
+          echo -n "$OPENAI_API_KEY" | base64 > openai_api_key_b64.txt
+          echo -n "$RUNWARE_API_KEY" | base64 > runware_api_key_b64.txt
+          echo -n "$GOOGLE_API_KEY" | base64 > google_api_key_b64.txt
+          echo -n "$GOOGLE_CX" | base64 > google_cx_b64.txt
+          echo -n "$OPENAI_BASE_URL" | base64 > openai_base_url_b64.txt
+          echo -n "$MONGODB_URI" | base64 > mongodb_uri_b64.txt
+
           kubectl create secret generic bot-secrets \
-            --from-literal=DISCORD_TOKEN=$DISCORD_TOKEN \
-            --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY \
-            --from-literal=RUNWARE_API_KEY=$RUNWARE_API_KEY \
-            --from-literal=GOOGLE_API_KEY=$GOOGLE_API_KEY \
-            --from-literal=GOOGLE_CX=$GOOGLE_CX \
-            --from-literal=OPENAI_BASE_URL=$OPENAI_BASE_URL \
-            --from-literal=MONGODB_URI=$MONGODB_URI
+            --from-file=DISCORD_TOKEN=discord_token_b64.txt \
+            --from-file=OPENAI_API_KEY=openai_api_key_b64.txt \
+            --from-file=RUNWARE_API_KEY=runware_api_key_b64.txt \
+            --from-file=GOOGLE_API_KEY=google_api_key_b64.txt \
+            --from-file=GOOGLE_CX=google_cx_b64.txt \
+            --from-file=OPENAI_BASE_URL=openai_base_url_b64.txt \
+            --from-file=MONGODB_URI=mongodb_uri_b64.txt
 
       - name: Apply Kubernetes manifests
         run: |
