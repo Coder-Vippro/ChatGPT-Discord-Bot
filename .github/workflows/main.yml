@@ -94,4 +94,4 @@ jobs:
 
       - name: Apply Kubernetes manifests
         run: |
-          kubectl apply -f /home/actions-runner/chatgpt-discord-bot/k3s/chatgpt-discord-bot-deployment.yaml
+          kubectl apply -f /home/vps/actions-runner/chatgpt-discord-bot/k3s/chatgpt-discord-bot-deployment.yaml
