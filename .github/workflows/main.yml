@@ -69,9 +69,6 @@ jobs:
     environment: Private Server Deploy
     needs: build-and-push
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Generate Kubernetes Secret YAML
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
@@ -97,11 +94,11 @@ jobs:
             OPENAI_BASE_URL: "$OPENAI_BASE_URL"
             MONGODB_URI: "$MONGODB_URI"
           EOF
-
+      
       - name: Apply Kubernetes Secret
         run: |
           kubectl apply -f bot-secrets.yaml
-
+      
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f /home/vps/actions-runner/chatgpt-discord-bot/k3s/chatgpt-discord-bot-deployment.yaml
