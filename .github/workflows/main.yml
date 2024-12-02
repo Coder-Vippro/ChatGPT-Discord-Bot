@@ -63,7 +63,7 @@ jobs:
           docker push $IMAGE_NAME:$IMAGE_TAG
 
   # Deploy from GHCR to the main server
-   deploy:
+  deploy:
     runs-on: self-hosted
     environment: Private Server Deploy
     needs: build-and-push
