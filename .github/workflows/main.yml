@@ -64,7 +64,7 @@ jobs:
           docker push $IMAGE_NAME:$IMAGE_TAG
 
   # Deploy from GHCR to the main server
-  deploy:
+   deploy:
     runs-on: self-hosted
     environment: Private Server Deploy
     needs: build-and-push
@@ -72,7 +72,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create Kubernetes secrets
+      - name: Generate Kubernetes Secret YAML
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -82,25 +82,25 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
         run: |
-          kubectl delete secret bot-secrets || true
+          cat <<EOF > bot-secrets.yaml
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: bot-secrets
+          type: Opaque
+          stringData:
+            DISCORD_TOKEN: "$DISCORD_TOKEN"
+            OPENAI_API_KEY: "$OPENAI_API_KEY"
+            RUNWARE_API_KEY: "$RUNWARE_API_KEY"
+            GOOGLE_API_KEY: "$GOOGLE_API_KEY"
+            GOOGLE_CX: "$GOOGLE_CX"
+            OPENAI_BASE_URL: "$OPENAI_BASE_URL"
+            MONGODB_URI: "$MONGODB_URI"
+          EOF
 
-          # Encode secrets as Base64
-          echo -n "$DISCORD_TOKEN" | base64 > discord_token_b64.txt
-          echo -n "$OPENAI_API_KEY" | base64 > openai_api_key_b64.txt
-          echo -n "$RUNWARE_API_KEY" | base64 > runware_api_key_b64.txt
-          echo -n "$GOOGLE_API_KEY" | base64 > google_api_key_b64.txt
-          echo -n "$GOOGLE_CX" | base64 > google_cx_b64.txt
-          echo -n "$OPENAI_BASE_URL" | base64 > openai_base_url_b64.txt
-          echo -n "$MONGODB_URI" | base64 > mongodb_uri_b64.txt
-
-          kubectl create secret generic bot-secrets \
-            --from-file=DISCORD_TOKEN=discord_token_b64.txt \
-            --from-file=OPENAI_API_KEY=openai_api_key_b64.txt \
-            --from-file=RUNWARE_API_KEY=runware_api_key_b64.txt \
-            --from-file=GOOGLE_API_KEY=google_api_key_b64.txt \
-            --from-file=GOOGLE_CX=google_cx_b64.txt \
-            --from-file=OPENAI_BASE_URL=openai_base_url_b64.txt \
-            --from-file=MONGODB_URI=mongodb_uri_b64.txt
+      - name: Apply Kubernetes Secret
+        run: |
+          kubectl apply -f bot-secrets.yaml
 
       - name: Apply Kubernetes manifests
         run: |
