@@ -6,7 +6,6 @@ on:
       - main
 
 jobs:
-  # Run unit tests for the project
   test:
     runs-on: ubuntu-latest
     steps:
