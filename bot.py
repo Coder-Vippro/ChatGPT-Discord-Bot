@@ -606,7 +606,8 @@ async def handle_user_message(message: discord.Message):
         error_message = f"Error: {str(e)}"
         logging.error(f"Error handling user message: {error_message}")
         await message.channel.send(error_message)
-
+        db.user_histories.delete_one({'user_id': user_id})
+        
 # Function to trim the history to avoid exceeding token limits
 def trim_history(history):
     """Trims the history to avoid exceeding token limits."""
