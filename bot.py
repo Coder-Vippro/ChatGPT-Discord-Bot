@@ -307,7 +307,7 @@ async def search(interaction: discord.Interaction, query: str):
 
     try:
         # Perform Google search
-        search_results = google_custom_search(query, num_results=5)
+        search_results = google_custom_search(query, num_results=3)
         if not search_results:
             await interaction.followup.send("No search results found.")
             return
