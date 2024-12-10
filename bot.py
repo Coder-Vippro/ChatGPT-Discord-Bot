@@ -116,7 +116,7 @@ MODEL_OPTIONS = [
 # Prompt for different plugins
 WEB_SCRAPING_PROMPT = "You are using the Web Scraping Plugin, gathering information from given url. Respond accurately and combine data to provide a clear, insightful summary. "
 NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You can chat, generate images, and perform searches. Craft responses that are easy to copy directly into Discord chats, without using markdown, code blocks, or extra formatting. When you solving any problems you must remember that: Let's solve this step-by-step. What information do we need to find? What operation might help us solve this? Explain your reasoning and provide the answer."
-SEARCH_PROMPT = "You are using the Google Search Plugin, accessing information from the top 3 Google results. Summarize these findings clearly, adding relevant insights to answer the users question."
+SEARCH_PROMPT = "You are using the Google Search Plugin, accessing information from the top 3 Google results link which is the scraped content from these 3 website. Summarize these findings clearly, adding relevant insights to answer the users question."
 
 # Google API details
 GOOGLE_API_KEY = str(os.getenv("GOOGLE_API_KEY"))  # Google API Key
@@ -312,24 +312,21 @@ async def search(interaction: discord.Interaction, query: str):
             await interaction.followup.send("No search results found.")
             return
 
-        # Prepare the search results for the AI model
-        combined_input = f"{SEARCH_PROMPT}\nUser query: {query}\nGoogle search results:\n"
-        
-        # Extract URLs and prepare the message
-        links = []
+        # Scrape content from the first 5 links
+        scraped_contents = []
         for result in search_results:
-            url = result.split('\n')[1].split('Link: ')[1]  # Extract URL from the result string
-            links.append(url)
-            combined_input += f"{result}\n"
+            url = result.split('\n')[1].split('Link: ')[1]
+            content = scrape_web_content(url)
+            scraped_contents.append(content)
 
-        # Add links at the end of the combined input
-        combined_input += "\nLinks:\n" + "\n".join(links)
+        # Prepare the combined input for the AI model
+        combined_input = f"{SEARCH_PROMPT}\nUser query: {query}\nScraped Contents:\n" + "\n".join(scraped_contents)
 
         history.append({"role": "system", "content": combined_input})
 
         # Send the history to the AI model
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=history,
             temperature=0.3,
             max_tokens=4096,
@@ -340,9 +337,8 @@ async def search(interaction: discord.Interaction, query: str):
         history.append({"role": "assistant", "content": reply})
         save_history(user_id, history)
 
-        # Prepare the final response including the links
-        links_message = "\nLinks:\n" + "\n".join(links)
-        await interaction.followup.send(reply + links_message)
+        # Send the final response to the user
+        await interaction.followup.send(reply)
 
     except Exception as e:
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
