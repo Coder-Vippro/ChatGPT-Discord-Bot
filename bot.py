@@ -576,9 +576,9 @@ async def handle_user_message(message: discord.Message):
         if model in ["gpt-4o", "gpt-4o-mini"]:
             # Include parameters for 'gpt-4o' models
             api_params.update({
-                "temperature": 0.3,
+                "temperature": 0.5,
                 "max_tokens": 4096,
-                "top_p": 0.7,
+                "top_p": 0.5,
             })
 
         # Send messages to the API
