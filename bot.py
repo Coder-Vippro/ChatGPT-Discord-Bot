@@ -307,7 +307,7 @@ async def search(interaction: discord.Interaction, query: str):
 
     try:
         # Perform Google search
-        search_results = google_custom_search(query, num_results=3)
+        search_results = google_custom_search(query, num_results=2)
         if not search_results:
             await interaction.followup.send("No search results found.")
             return
@@ -328,9 +328,9 @@ async def search(interaction: discord.Interaction, query: str):
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=history,
-            temperature=0.3,
+            temperature=0.4,
             max_tokens=4096,
-            top_p=0.7
+            top_p=1
         )
 
         reply = response.choices[0].message.content
