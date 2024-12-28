@@ -504,7 +504,7 @@ async def handle_user_message(message: discord.Message):
     # Prepare messages to send to API
     messages_to_send = history.copy()
 
-    if model in ["gpt-4o", "gpt-4o-mini","o1"]:
+    if model in ["gpt-4o", "gpt-4o-mini", "o1"]:
         # If the model is "o1", rename "system" role to "developer"
         if model == "o1":
             for msg in messages_to_send:
@@ -518,6 +518,8 @@ async def handle_user_message(message: discord.Message):
                 if msg["role"] == "user" and isinstance(msg["content"], list):
                     for part in reversed(msg["content"]):
                         if part["type"] == "image_url":
+                            # Add 'details' key to each image
+                            part["details"] = "high"
                             images.append(part)
                             if len(images) == n:
                                 return images[::-1]
@@ -595,7 +597,7 @@ async def handle_user_message(message: discord.Message):
 
     except RateLimitError:
         error_message = (
-            "Error: Rate limit exceeded for your model"
+            "Error: Rate limit exceeded for your model. "
             "Please try again later or use /choose_model to change to any models else."
         )
         logging.error(f"Rate limit error: {error_message}")
