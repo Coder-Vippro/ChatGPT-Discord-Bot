@@ -110,7 +110,8 @@ MODEL_OPTIONS = [
     "gpt-4o",
     "gpt-4o-mini",
     "o1-preview",
-    "o1-mini"
+    "o1-mini",
+    "o1"
 ]
 
 # Prompt for different plugins
@@ -503,7 +504,7 @@ async def handle_user_message(message: discord.Message):
     # Prepare messages to send to API
     messages_to_send = history.copy()
 
-    if model in ["gpt-4o", "gpt-4o-mini"]:
+    if model in ["gpt-4o", "gpt-4o-mini","o1"]:
         # Include up to 10 previous images
         def get_last_n_images(history, n=10):
             images = []
@@ -573,11 +574,11 @@ async def handle_user_message(message: discord.Message):
             "messages": messages_to_send,
         }
 
-        if model in ["gpt-4o", "gpt-4o-mini"]:
+        if model in ["gpt-4o", "gpt-4o-mini","o1"]:
             # Include parameters for 'gpt-4o' models
             api_params.update({
                 "temperature": 0.3,
-                "max_tokens": 4096,
+                "max_tokens": 8096,
                 "top_p": 0.7,
             })
 
