@@ -505,6 +505,12 @@ async def handle_user_message(message: discord.Message):
     messages_to_send = history.copy()
 
     if model in ["gpt-4o", "gpt-4o-mini","o1"]:
+        # If the model is "o1", rename "system" role to "developer"
+        if model == "o1":
+            for msg in messages_to_send:
+                if msg["role"] == "system":
+                    msg["role"] = "developer"
+
         # Include up to 10 previous images
         def get_last_n_images(history, n=10):
             images = []
@@ -514,7 +520,7 @@ async def handle_user_message(message: discord.Message):
                         if part["type"] == "image_url":
                             images.append(part)
                             if len(images) == n:
-                                return images[::-1]  # Reverse to maintain order
+                                return images[::-1]
             return images[::-1]
 
         # Get the last 10 images
@@ -529,20 +535,18 @@ async def handle_user_message(message: discord.Message):
                 ]
                 last_message["content"].extend(latest_images)
             else:
-                # Ensure content is a list
                 last_message["content"] = [{"type": "text", "text": last_message["content"]}]
                 last_message["content"].extend(latest_images)
             messages_to_send[-1] = last_message
 
         # Fix the 431 error by limiting the number of images
-        max_images = 10  # Adjust the limit as needed
+        max_images = 10
         total_images = 0
         for msg in messages_to_send:
             if msg["role"] == "user" and isinstance(msg["content"], list):
                 image_parts = [part for part in msg["content"] if part.get("type") == "image_url"]
                 total_images += len(image_parts)
         if total_images > max_images:
-            # Remove older images to keep total_images <= max_images
             images_removed = 0
             for msg in messages_to_send:
                 if msg["role"] == "user" and isinstance(msg["content"], list):
@@ -550,19 +554,17 @@ async def handle_user_message(message: discord.Message):
                     for part in msg["content"]:
                         if part.get("type") == "image_url" and images_removed < (total_images - max_images):
                             images_removed += 1
-                            continue  # Skip this image
+                            continue
                         new_content.append(part)
                     msg["content"] = new_content
 
     else:
-        # Exclude image URLs and system prompts for 'o1' model family
-        # Remove 'image_url' content from messages
+        # Exclude image URLs and system prompts for other models
         for msg in messages_to_send:
             if msg["role"] == "user" and isinstance(msg["content"], list):
                 msg["content"] = [
                     part for part in msg["content"] if part.get("type") != "image_url"
                 ]
-        # Remove system prompts from messages
         messages_to_send = [
             msg for msg in messages_to_send if msg.get("role") != "system"
         ]
@@ -574,7 +576,7 @@ async def handle_user_message(message: discord.Message):
             "messages": messages_to_send,
         }
 
-        if model in ["gpt-4o", "gpt-4o-mini","o1"]:
+        if model in ["gpt-4o", "gpt-4o-mini"]:
             # Include parameters for 'gpt-4o' models
             api_params.update({
                 "temperature": 0.3,
