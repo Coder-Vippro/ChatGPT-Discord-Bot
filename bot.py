@@ -510,7 +510,9 @@ async def handle_user_message(message: discord.Message):
             for msg in messages_to_send:
                 if msg["role"] == "system":
                     msg["role"] = "developer"
-                else:
+        elif model != "o1":
+            for msg in messages_to_send:
+                if msg["role"] == "developer":
                     msg["role"] = "system"
 
         # Include up to 10 previous images
