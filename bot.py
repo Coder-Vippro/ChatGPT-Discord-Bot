@@ -510,6 +510,8 @@ async def handle_user_message(message: discord.Message):
             for msg in messages_to_send:
                 if msg["role"] == "system":
                     msg["role"] = "developer"
+                else:
+                    msg["role"] = "system"
 
         # Include up to 10 previous images
         def get_last_n_images(history, n=10):
