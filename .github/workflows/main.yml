@@ -6,7 +6,6 @@ on:
       - main
 
 jobs:
-  # Run unit tests for the project
   tests:
     runs-on: ubuntu-latest
     steps:
@@ -35,33 +34,21 @@ jobs:
       - name: Run unit tests
         run: |
           python -m pytest tests/
-      
-      # Run security check
+
       - name: pyupio/safety-action
         uses: pyupio/safety-action@v1.0.1
         with:
           api-key: ${{ secrets.SAFETY_API_KEY }}
-     
-  # Build and push package to GitHub Container Registry (GHCR)
+
   build-and-push:
     runs-on: ubuntu-latest
-    environment: Private Server Deploy
-    needs: tests  # This job depends on the CI job
+    needs: tests
     steps:
-      - name: Check out the repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      # Cache Docker layers
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-docker-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-docker-
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -70,22 +57,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image with caching
-        run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
-          IMAGE_TAG=latest
+      - name: Build and push Docker image with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: "ghcr.io/coder-vippro/chatgpt-discord-bot:latest"
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-          docker buildx build \
-            --cache-from=type=gha,ref=ghcr.io/coder-vippro/chatgpt-discord-bot:cache \
-            --cache-to=type=gha,mode=max,ref=ghcr.io/coder-vippro/chatgpt-discord-bot:cache \
-            --push \
-            -t $IMAGE_NAME:$IMAGE_TAG .
-
-  # Deploy from GHCR to the main server
   deploy:
     runs-on: self-hosted
-    environment: Private Server Deploy  # Specify the deployment environment
-    needs: build-and-push  # This job depends on the GHCR push job
+    needs: build-and-push
     steps:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
