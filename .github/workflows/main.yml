@@ -17,7 +17,15 @@ jobs:
         uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.12.3'
-        
+
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -34,10 +42,9 @@ jobs:
         with:
           api-key: ${{ secrets.SAFETY_API_KEY }}
      
-  
   # Build and push package to GitHub Container Registry (GHCR)
   build-and-push:
-    runs-on: ubuntu-latest 
+    runs-on: ubuntu-latest
     environment: Private Server Deploy
     needs: tests  # This job depends on the CI job
     steps:
@@ -51,11 +58,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
       - name: Build the Docker image
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
-          docker build -t $IMAGE_NAME:$IMAGE_TAG .
+          docker build --cache-from=type=local,src=/tmp/.buildx-cache \
+                       --cache-to=type=local,dest=/tmp/.buildx-cache \
+                       -t $IMAGE_NAME:$IMAGE_TAG .
 
       - name: Push the Docker image
         run: |
@@ -69,7 +86,6 @@ jobs:
     environment: Private Server Deploy  # Specify the deployment environment
     needs: build-and-push  # This job depends on the GHCR push job
     steps:
-      # Step 1: Log in to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -77,30 +93,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 2: Stop and remove the previous running container
+      - name: Cache Docker layers on server
+        uses: actions/cache@v3
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
       - name: Remove old running container
         run: |
           docker rm -f chatgpt-discord-bot || true
 
-      # Step 3: Remove the old image
       - name: Remove old image
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
           docker rmi $IMAGE_NAME:$IMAGE_TAG || true
 
-      # Step 4: Pull and Run Docker container from GHCR
       - name: Pull and Run Docker container from GHCR
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
 
           # Pull the latest image from GHCR
-          
           docker pull $IMAGE_NAME:$IMAGE_TAG
 
           # Run the new container with the latest image and pass in environment variables securely
-
           docker run -d --name chatgpt-discord-bot \
             -e DISCORD_TOKEN="${{ secrets.DISCORD_TOKEN }}" \
             -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
