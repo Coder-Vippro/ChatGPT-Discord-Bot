@@ -67,10 +67,13 @@ jobs:
           cache-to: type=gha,mode=max
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Deploy from GHCR to the main server
   deploy:
     runs-on: self-hosted
-    needs: build-and-push
+    environment: Private Server Deploy  # Specify the deployment environment
+    needs: build-and-push  # This job depends on the GHCR push job
     steps:
+      # Step 1: Log in to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -78,25 +81,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Step 2: Stop and remove the previous running container
       - name: Remove old running container
         run: |
           docker rm -f chatgpt-discord-bot || true
 
+      # Step 3: Remove the old image
       - name: Remove old image
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
           docker rmi $IMAGE_NAME:$IMAGE_TAG || true
 
+      # Step 4: Pull and Run Docker container from GHCR
       - name: Pull and Run Docker container from GHCR
         run: |
           IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
           IMAGE_TAG=latest
 
           # Pull the latest image from GHCR
+          
           docker pull $IMAGE_NAME:$IMAGE_TAG
 
           # Run the new container with the latest image and pass in environment variables securely
+
           docker run -d --name chatgpt-discord-bot \
             -e DISCORD_TOKEN="${{ secrets.DISCORD_TOKEN }}" \
             -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
