@@ -615,11 +615,12 @@ async def handle_user_message(message: discord.Message):
         
 # Function to trim the history to avoid exceeding token limits
 def trim_history(history):
-    """Trims the history to avoid exceeding token limits."""
+    """Trims the history to avoid exceeding token limits by removing older messages first."""
     tokens_used = sum(len(str(item['content'])) for item in history)
     max_tokens_allowed = 9000
-    while tokens_used > max_tokens_allowed:
-        removed_item = history.pop(1)
+    # Remove from the front (oldest) while total tokens exceed limit
+    while tokens_used > max_tokens_allowed and len(history) > 1:
+        removed_item = history.pop(0)
         tokens_used -= len(str(removed_item['content']))
 
 # Function to send a response to the channel
