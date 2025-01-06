@@ -9,6 +9,9 @@ jobs:
   # Run unit tests for the project
   test:
     runs-on: ubuntu-latest
+    env:
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+    environment: Private Server Deploy 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
