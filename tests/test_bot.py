@@ -2,8 +2,6 @@ import unittest
 import unittest.mock as mock
 from unittest.mock import MagicMock, patch, AsyncMock
 from unittest.mock import patch
-import mongomock
-from pymongo import MongoClient
 import asyncio
 import requests
 from flask import Flask
