@@ -8,6 +8,9 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+    environment: Private Server Deploy 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,6 +45,7 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
+    environment: Private Server Deploy 
     needs: tests
     steps:
       - name: Checkout repository
