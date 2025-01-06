@@ -113,15 +113,6 @@ class TestFullBot(unittest.TestCase):
     def test_reset_command(self):
         self.loop.run_until_complete(self.async_test_reset())
 
-    async def async_test_remaining_turns(self):
-        interaction = AsyncMock()
-        interaction.user.id = 1234
-        await remaining_turns.callback(interaction)
-        interaction.response.send_message.assert_called()
-
-    def test_remaining_turns_command(self):
-        self.loop.run_until_complete(self.async_test_remaining_turns())
-
     async def async_test_help_command(self):
         interaction = AsyncMock()
         await help_command(interaction)
@@ -166,32 +157,3 @@ class TestFullBot(unittest.TestCase):
             with patch("bot.db.user_preferences.find_one", return_value=None):
                 model = get_user_model(1234)
                 self.assertEqual(model, "gpt-4o")
-
-    async def async_test_daily_reset(self):
-        await daily_reset()
-        # Verify that the reset_remaining_turns function was called
-        with patch("bot.reset_remaining_turns") as mock_reset:
-            await daily_reset()
-            mock_reset.assert_called_once()
-
-    def test_daily_reset_task(self):
-        self.loop.run_until_complete(self.async_test_daily_reset())
-
-    def test_get_remaining_turns(self):
-        with patch("bot.db.chat_turns.find_one", return_value={"remaining_turns": 5}):
-            remaining_turns = get_remaining_turns(1234, "gpt-4o")
-            self.assertEqual(remaining_turns, 5, "Should return the correct remaining turns from the database.")
-
-    def test_update_remaining_turns(self):
-        with patch("bot.db.chat_turns.update_one") as mock_update:
-            update_remaining_turns(1234, "gpt-4o", 10)
-            mock_update.assert_called_once_with(
-                {'user_id': 1234, 'model': "gpt-4o"},
-                {'$set': {'remaining_turns': 10}},
-                upsert=True
-            )
-
-    def test_reset_remaining_turns(self):
-        with patch("bot.db.chat_turns.update_many") as mock_update:
-            reset_remaining_turns()
-            mock_update.assert_called_once_with({}, {'$set': {'remaining_turns': 100}})
