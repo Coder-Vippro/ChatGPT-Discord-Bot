@@ -427,6 +427,36 @@ async def remaining_turns(interaction: discord.Interaction):
 
     await interaction.response.send_message("\n".join(remaining_turns_info), ephemeral=True)
 
+# Slash command for user statistics (/user_stat)
+@tree.command(name="user_stat", description="Get your current input token, output token, and model.")
+async def user_stat(interaction: discord.Interaction):
+    """Fetches and displays the current input token, output token, and model for the user."""
+    user_id = interaction.user.id
+    history = get_history(user_id)
+    model = get_user_model(user_id)
+
+    # Handle cases where user model is not found
+    if not model:
+        model = "gpt-4o-mini"
+
+    # Handle cases where user history is not found or blank
+    if not history or len(history) == 0:
+        input_tokens = 0
+        output_tokens = 0
+    else:
+        # Calculate input and output tokens
+        input_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'user')
+        output_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'assistant')
+
+    stat_message = (
+        f"**User Statistics:**\n"
+        f"Model: `{model}`\n"
+        f"Input Tokens: `{input_tokens}`\n"
+        f"Output Tokens: `{output_tokens}`\n"
+    )
+
+    await interaction.response.send_message(stat_message, ephemeral=True)
+
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
 async def help_command(interaction: discord.Interaction):
@@ -439,6 +469,7 @@ async def help_command(interaction: discord.Interaction):
         "/generate `<prompt>` - Generate an image from a text prompt.\n"
         "/reset - Reset your conversation history.\n"
         "/remaining_turns - Check the remaining chat turns for each model.\n"
+        "/user_stat - Get your current input token, output token, and model.\n"
         "/help - Display this help message.\n"
         "**Các lệnh có sẵn:**\n"
         "/choose_model - Chọn mô hình AI để sử dụng cho phản hồi (gpt-4o, gpt-4o-mini, o1-preview, o1-mini).\n"
@@ -447,6 +478,7 @@ async def help_command(interaction: discord.Interaction):
         "/generate `<gợi ý>` - Tạo hình ảnh từ gợi ý văn bản.\n"
         "/reset - Đặt lại lịch sử trò chuyện của bạn.\n"
         "/remaining_turns - Kiểm tra số lượt trò chuyện còn lại cho mỗi mô hình.\n"
+        "/user_stat - Nhận thông tin về token đầu vào, token đầu ra và mô hình hiện tại của bạn.\n"
         "/help - Hiển thị tin nhắn trợ giúp này.\n"
     )
     await interaction.response.send_message(help_message, ephemeral=True)
