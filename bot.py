@@ -435,9 +435,18 @@ async def user_stat(interaction: discord.Interaction):
     history = get_history(user_id)
     model = get_user_model(user_id)
 
-    # Calculate input and output tokens
-    input_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'user')
-    output_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'assistant')
+    # Handle cases where user model is not found
+    if not model:
+        model = "gpt-4o-mini"
+
+    # Handle cases where user history is not found or blank
+    if not history or len(history) == 0:
+        input_tokens = 0
+        output_tokens = 0
+    else:
+        # Calculate input and output tokens
+        input_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'user')
+        output_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'assistant')
 
     stat_message = (
         f"**User Statistics:**\n"
