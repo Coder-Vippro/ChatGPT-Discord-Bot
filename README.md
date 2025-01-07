@@ -1,4 +1,3 @@
-
 # ChatGPT Discord Bot
 
 ![Build and Push](https://github.com/coder-vippro/ChatGPT-Discord-Bot/actions/workflows/main.yml/badge.svg)
@@ -119,6 +118,7 @@ Once the bot is running, it connects to Discord using credentials from `.env`. C
 - **Scrape Web Content**: `/web url: "https://example.com"`
 - **Search Google**: `/search prompt: "latest news in Vietnam"`
 - **Normal chat**: `Ping the bot with a question or send a dms to the bot to start`
+- **User Statistics**: `/user_stat` - Get your current input token, output token, and model.
 
 ## CI/CD
 
