@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 from flask import Flask, jsonify
 import threading
+import tiktoken
 load_dotenv()
 
 # Flask app for health-check
@@ -437,16 +438,24 @@ async def user_stat(interaction: discord.Interaction):
 
     # Handle cases where user model is not found
     if not model:
-        model = "gpt-4o-mini"
+        model = "gpt-4o-mini"  # Default model
 
-    # Handle cases where user history is not found or blank
-    if not history or len(history) == 0:
-        input_tokens = 0
-        output_tokens = 0
-    else:
-        # Calculate input and output tokens
-        input_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'user')
-        output_tokens = sum(len(str(item['content'])) for item in history if item['role'] == 'assistant')
+    # Retrieve the appropriate encoding for the selected model
+    encoding = tiktoken.encoding_for_model(model)
+
+    # Initialize token counts
+    input_tokens = 0
+    output_tokens = 0
+
+    # Calculate input and output tokens
+    if history:
+        for item in history:
+            content = item['content']
+            token_count = len(encoding.encode(content))
+            if item['role'] == 'user':
+                input_tokens += token_count
+            elif item['role'] == 'assistant':
+                output_tokens += token_count
 
     stat_message = (
         f"**User Statistics:**\n"
@@ -456,6 +465,7 @@ async def user_stat(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(stat_message, ephemeral=True)
+    
 
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
