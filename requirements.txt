@@ -8,3 +8,4 @@ Pillow
 discord.py
 pymongo
 flask
+tiktoken
