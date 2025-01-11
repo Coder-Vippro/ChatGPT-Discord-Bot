@@ -177,34 +177,6 @@ def save_user_model(user_id, model):
         upsert=True
     )
 
-# New function to get the remaining chat turns for a user and model
-def get_remaining_turns(user_id, model):
-    user_turns = db.chat_turns.find_one({'user_id': user_id, 'model': model})
-    if user_turns and 'remaining_turns' in user_turns:
-        return user_turns['remaining_turns']
-    else:
-        # Define rate limits for each model
-        rate_limits = {
-            "o1": 8,
-            "o1-preview": 8,
-            "o1-mini": 12,
-            "gpt-4o": 50,
-            "gpt-4o-mini": 150
-        }
-        return rate_limits.get(model, 100)  # Default to 100 turns if not found
-
-# New function to update the remaining chat turns for a user and model
-def update_remaining_turns(user_id, model, remaining_turns):
-    db.chat_turns.update_one(
-        {'user_id': user_id, 'model': model},
-        {'$set': {'remaining_turns': remaining_turns}},
-        upsert=True
-    )
-
-# New function to reset the remaining chat turns for all users and models
-def reset_remaining_turns():
-    db.chat_turns.update_many({}, {'$set': {'remaining_turns': 100}})
-
 # Intents and bot initialization
 intents = discord.Intents.default()
 intents.message_content = True
@@ -415,19 +387,6 @@ async def reset(interaction: discord.Interaction):
     db.user_histories.delete_one({'user_id': user_id})
     await interaction.response.send_message("Your data has been cleared and reset!", ephemeral=True)
 
-# Slash command to check remaining chat turns (/remaining_turns)
-@tree.command(name="remaining_turns", description="Check the remaining chat turns for each model.")
-async def remaining_turns(interaction: discord.Interaction):
-    """Checks the remaining chat turns for each model."""
-    user_id = interaction.user.id
-    remaining_turns_info = []
-
-    for model in MODEL_OPTIONS:
-        remaining_turns = get_remaining_turns(user_id, model)
-        remaining_turns_info.append(f"{model}: {remaining_turns} turns left")
-
-    await interaction.response.send_message("\n".join(remaining_turns_info), ephemeral=True)
-
 # Slash command for user statistics (/user_stat)
 @tree.command(name="user_stat", description="Get your current input token, output token, and model.")
 async def user_stat(interaction: discord.Interaction):
@@ -440,8 +399,13 @@ async def user_stat(interaction: discord.Interaction):
     if not model:
         model = "gpt-4o-mini"  # Default model
 
+    # Adjust the model for token encoding if necessary
+    model_for_encoding = model
+    if model in ["gpt-4o", "o1", "o1-preview", "o1-mini"]:
+        model_for_encoding = "gpt-4o"
+
     # Retrieve the appropriate encoding for the selected model
-    encoding = tiktoken.encoding_for_model(model)
+    encoding = tiktoken.encoding_for_model(model_for_encoding)
 
     # Initialize token counts
     input_tokens = 0
@@ -465,7 +429,7 @@ async def user_stat(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(stat_message, ephemeral=True)
-    
+
 
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
@@ -771,18 +735,13 @@ async def change_status():
             await bot.change_presence(activity=discord.Game(name=status))
             await asyncio.sleep(300)  # Change every 60 seconds
 
-# Task to reset chat turns daily
-@tasks.loop(hours=24)
-async def daily_reset():
-    reset_remaining_turns()
-
 @bot.event
 async def on_ready():
     """Bot startup event to sync slash commands and start status loop."""
     await tree.sync()  # Sync slash commands
     print(f"Logged in as {bot.user}")
     change_status.start() # Start the status changing loop   
-    daily_reset.start()  # Start the daily reset loop
+
 
 # Start Flask in a separate thread
 flask_thread = threading.Thread(target=run_flask)
