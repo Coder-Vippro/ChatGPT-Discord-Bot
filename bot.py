@@ -399,13 +399,14 @@ async def user_stat(interaction: discord.Interaction):
     if not model:
         model = "gpt-4o-mini"  # Default model
 
-    # Adjust the model for token encoding if necessary
-    model_for_encoding = model
+    # Adjust model for encoding purposes
     if model in ["gpt-4o", "o1", "o1-preview", "o1-mini"]:
-        model_for_encoding = "gpt-4o"
+        encoding_model = "gpt-4o"
+    else:
+        encoding_model = model
 
     # Retrieve the appropriate encoding for the selected model
-    encoding = tiktoken.encoding_for_model(model_for_encoding)
+    encoding = tiktoken.encoding_for_model(encoding_model)
 
     # Initialize token counts
     input_tokens = 0
@@ -414,13 +415,25 @@ async def user_stat(interaction: discord.Interaction):
     # Calculate input and output tokens
     if history:
         for item in history:
-            content = item['content']
-            token_count = len(encoding.encode(content))
-            if item['role'] == 'user':
-                input_tokens += token_count
-            elif item['role'] == 'assistant':
-                output_tokens += token_count
+            content = item.get('content')  # Safely access 'content'
 
+            # Handle case where content is a list or other type
+            if isinstance(content, list):
+                # Convert list of objects to a single string (e.g., join texts with a space)
+                content = " ".join(
+                    sub_item.get('text', '') for sub_item in content if isinstance(sub_item, dict)
+                )
+
+            # Ensure content is a string before processing
+            if isinstance(content, str):
+                token_count = len(encoding.encode(content))
+                if item['role'] == 'user':
+                    input_tokens += token_count
+                elif item['role'] in ['assistant', 'developer']:
+                    # Treat 'developer' as 'assistant' for token counting
+                    output_tokens += token_count
+
+    # Create the statistics message
     stat_message = (
         f"**User Statistics:**\n"
         f"Model: `{model}`\n"
@@ -428,6 +441,7 @@ async def user_stat(interaction: discord.Interaction):
         f"Output Tokens: `{output_tokens}`\n"
     )
 
+    # Send the response
     await interaction.response.send_message(stat_message, ephemeral=True)
 
 
