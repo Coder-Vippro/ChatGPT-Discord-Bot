@@ -20,9 +20,6 @@ from bot import (
     save_history,
     get_user_model,
     save_user_model,
-    get_remaining_turns,
-    update_remaining_turns,
-    reset_remaining_turns,
     bot,
     process_request,
     process_queue,
@@ -30,7 +27,6 @@ from bot import (
     search,
     web,
     reset,
-    remaining_turns,
     help_command,
     should_respond_to_message,
     handle_user_message,
@@ -38,7 +34,6 @@ from bot import (
     generate_image,
     _generate_image_command,
     change_status,
-    daily_reset,
     on_ready
 )
 
