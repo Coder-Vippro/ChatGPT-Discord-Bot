@@ -35,6 +35,8 @@ def health():
         return jsonify(status="unhealthy", error="Bot is disconnected"), 500
     elif not bot.is_ready():  # Bot is not ready yet
         return jsonify(status="unhealthy", error="Bot is not ready"), 500
+    elif bot.latency > 151:  # Bot heartbeat is blocked for more than 151 seconds
+        return jsonify(status="unhealthy", error=f"Heartbeat to websocket blocked for {bot.latency:.2f} seconds"), 500
     else:
         return jsonify(status="healthy"), 200
 
@@ -182,7 +184,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 # Bot initialization
-bot = commands.Bot(command_prefix="!", intents=intents, heartbeat_timeout=120)
+bot = commands.Bot(command_prefix="", intents=intents, heartbeat_timeout=150)
 tree = bot.tree  # For slash commands
 
 # Function to perform a Google search and return results
