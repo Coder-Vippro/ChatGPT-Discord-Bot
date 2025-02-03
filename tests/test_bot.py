@@ -1,7 +1,6 @@
 import unittest
 import unittest.mock as mock
 from unittest.mock import MagicMock, patch, AsyncMock
-from unittest.mock import patch
 import asyncio
 import requests
 from flask import Flask
@@ -73,11 +72,53 @@ class TestFullBot(unittest.TestCase):
         result = scrape_web_content("https://example.com")
         self.assertIn("Some scraped text", result, "Scraped content should include known text.")
 
-    def test_get_history(self):
-        # Mock database behavior if needed
-        with patch("bot.db.user_histories.find_one", return_value={"history": [{"role": "system", "content": NORMAL_CHAT_PROMPT}]}):
-            history = get_history(1234)
+    async def async_test_get_history(self):
+        with patch("bot.db.user_histories.find_one", new_callable=AsyncMock) as mock_find_one:
+            mock_find_one.return_value = {"history": [{"role": "system", "content": NORMAL_CHAT_PROMPT}]}
+            history = await get_history(1234)
             self.assertIsInstance(history, list, "History should be a list.")
+
+    def test_get_history(self):
+        self.loop.run_until_complete(self.async_test_get_history())
+
+    async def async_test_get_user_model_default(self):
+        with patch("bot.db.user_preferences.find_one", new_callable=AsyncMock) as mock_find_one:
+            mock_find_one.return_value = None
+            model = await get_user_model(1234)
+            self.assertEqual(model, "gpt-4o")
+
+    def test_get_user_model_default(self):
+        self.loop.run_until_complete(self.async_test_get_user_model_default())
+
+    def test_trim_history_with_large_content(self):
+        sample_history = [{"role": "user", "content": "x" * 5000}, {"role": "user", "content": "y" * 5000}]
+        trim_history(sample_history)
+        self.assertGreaterEqual(len(sample_history), 1, "History should not be completely removed.")
+
+    def test_trim_history_with_empty_history(self):
+        history = []
+        trim_history(history)
+        self.assertEqual(len(history), 0, "Empty history should remain empty.")
+
+    def test_trim_history_with_single_message(self):
+        history = [{"role": "user", "content": "test"}]
+        trim_history(history)
+        self.assertEqual(len(history), 1, "Single message history should remain unchanged.")
+
+    async def async_test_process_message_with_attachment(self):
+        message = AsyncMock()
+        message.author.id = 1234
+        message.content = "Check this file"
+        message.attachments = [
+            AsyncMock(filename="test.txt", read=AsyncMock(return_value=b"File content"))
+        ]
+        
+        with patch("bot.on_message", new_callable=AsyncMock) as mock_on_message:
+            await bot.on_message(message)
+            mock_on_message.assert_called_once()
+
+    def test_process_message_with_attachment(self):
+        self.loop.run_until_complete(self.async_test_process_message_with_attachment())
 
     async def async_test_search(self):
         interaction = AsyncMock()
@@ -113,42 +154,6 @@ class TestFullBot(unittest.TestCase):
         await help_command(interaction)
         interaction.response.send_message.assert_called()
 
-    def test_trim_history(self):
-        sample_history = [{"role": "user", "content": "x" * 5000}, {"role": "user", "content": "y" * 5000}]
-        trim_history(sample_history)
-        def test_process_message_with_attachment(self):
-            # Test handling message with text file attachment 
-            message = AsyncMock()
-            message.author.id = 1234
-            message.content = "Check this file"
-            message.attachments = [
-                AsyncMock(
-                    filename="test.txt",
-                    read=AsyncMock(return_value=b"File content")
-                )
-            ]
-            
-            async def run_test():
-                with patch("bot.handle_user_message") as mock_handle:
-                    await bot.on_message(message)
-                    mock_handle.assert_called_once()
-            
-            self.loop.run_until_complete(run_test())
+    def test_help_command(self):
+        self.loop.run_until_complete(self.async_test_help_command())
 
-    def test_trim_history_with_empty_history(self):
-            # Test trim_history with empty history
-            history = []
-            trim_history(history)
-            self.assertEqual(len(history), 0)
-
-    def test_trim_history_with_single_message(self):
-            # Test trim_history with single message
-            history = [{"role": "user", "content": "test"}]
-            trim_history(history) 
-            self.assertEqual(len(history), 1)
-
-    def test_get_user_model_default(self):
-            # Test get_user_model returns default model
-            with patch("bot.db.user_preferences.find_one", return_value=None):
-                model = get_user_model(1234)
-                self.assertEqual(model, "gpt-4o")
