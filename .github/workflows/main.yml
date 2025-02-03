@@ -77,14 +77,6 @@ jobs:
     environment: Private Server Deploy  # Specify the deployment environment
     needs: build-and-push  # This job depends on the GHCR push job
     steps:
-      # Step 1: Log in to GitHub Container Registry
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       # Step 2: Stop and remove the previous running container
       - name: Remove old running container
         run: |
