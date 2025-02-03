@@ -282,7 +282,7 @@ async def choose_model(interaction: discord.Interaction):
         user_id = interaction.user.id
         
         # Save the model selection to the database
-        save_user_model(user_id, selected_model)
+        await save_user_model(user_id, selected_model)
         await interaction.response.send_message(
             f"Model set to `{selected_model}` for your responses.", ephemeral=True
         )
@@ -648,7 +648,7 @@ async def process_user_message(message: discord.Message):
 
         reply = response.choices[0].message.content
         history.append({"role": "assistant", "content": reply})
-        save_history(user_id, history)
+        await save_history(user_id, history)
 
         await send_response(message.channel, reply)
 
