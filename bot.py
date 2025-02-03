@@ -20,6 +20,7 @@ from pymongo import MongoClient
 from flask import Flask, jsonify
 import threading
 import tiktoken
+import asyncio
 load_dotenv()
 
 # Flask app for health-check
@@ -114,7 +115,8 @@ MODEL_OPTIONS = [
     "gpt-4o-mini",
     "o1-preview",
     "o1-mini",
-    "o1"
+    "o1",
+    "o3-mini"
 ]
 
 # Prompt for different plugins
@@ -184,7 +186,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 # Bot initialization
-bot = commands.Bot(command_prefix="", intents=intents, heartbeat_timeout=150)
+bot = commands.Bot(command_prefix="//quocanhvu", intents=intents, heartbeat_timeout=120)
 tree = bot.tree  # For slash commands
 
 # Function to perform a Google search and return results
@@ -197,7 +199,7 @@ def google_custom_search(query: str, num_results: int = 3) -> list:
         "num": num_results
     }
     try:
-        response = requests.get(search_url, params=params, timeout=15)  # Add timeout
+        response = requests.get(search_url, params=params, timeout=30)  # Add timeout
         response.raise_for_status()  # Check for any errors in the response
         data = response.json()
 
@@ -399,10 +401,10 @@ async def user_stat(interaction: discord.Interaction):
 
     # Handle cases where user model is not found
     if not model:
-        model = "gpt-4o-mini"  # Default model
+        model = "gpt-4o"  # Default model
 
     # Adjust model for encoding purposes
-    if model in ["gpt-4o", "o1", "o1-preview", "o1-mini"]:
+    if model in ["gpt-4o", "o1", "o1-preview", "o1-mini", "o3-mini"]:
         encoding_model = "gpt-4o"
     else:
         encoding_model = model
@@ -452,15 +454,6 @@ async def user_stat(interaction: discord.Interaction):
 async def help_command(interaction: discord.Interaction):
     """Sends a list of available commands to the user."""
     help_message = (
-        "**Available Commands:**\n"
-        "/choose_model - Select the AI model to use for responses (gpt-4o, gpt-4o-mini, o1-preview, o1-mini).\n"
-        "/search `<query>` - Search on Google and send results to AI model.\n"
-        "/web `<url>` - Scrape a webpage and send data to AI model.\n"
-        "/generate `<prompt>` - Generate an image from a text prompt.\n"
-        "/reset - Reset your conversation history.\n"
-        "/remaining_turns - Check the remaining chat turns for each model.\n"
-        "/user_stat - Get your current input token, output token, and model.\n"
-        "/help - Display this help message.\n"
         "**Các lệnh có sẵn:**\n"
         "/choose_model - Chọn mô hình AI để sử dụng cho phản hồi (gpt-4o, gpt-4o-mini, o1-preview, o1-mini).\n"
         "/search `<truy vấn>` - Tìm kiếm trên Google và gửi kết quả đến mô hình AI.\n"
@@ -494,6 +487,7 @@ async def send_response(interaction: discord.Interaction, reply: str):
     else:
         await interaction.followup.send(reply)
 
+
 # Event to handle incoming messages
 @bot.event
 async def on_message(message: discord.Message):
@@ -507,6 +501,9 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
 
 async def handle_user_message(message: discord.Message):
+    asyncio.create_task(process_user_message(message)) 
+
+async def process_user_message(message: discord.Message):
     user_id = message.author.id
     history = get_history(user_id)
     model = get_user_model(user_id)
