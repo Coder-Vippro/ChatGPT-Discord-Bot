@@ -299,7 +299,7 @@ async def search(interaction: discord.Interaction, query: str):
     """Searches Google and sends results to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
-    history = get_history(user_id)
+    history = await get_history(user_id)
 
     history.append({"role": "user", "content": query})
 
