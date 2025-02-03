@@ -4,6 +4,7 @@ import io
 import pymongo
 from discord.ext import commands, tasks
 from discord import app_commands
+from motor.motor_asyncio import AsyncIOMotorClient
 import requests
 from bs4 import BeautifulSoup
 import logging
@@ -138,7 +139,7 @@ MONGODB_URI = str(os.getenv("MONGODB_URI"))
 runware = Runware(api_key=RUNWARE_API_KEY)
 
 # MongoDB client initialization
-mongo_client = MongoClient(MONGODB_URI)
+mongo_client = AsyncIOMotorClient(MONGODB_URI)
 db = mongo_client['chatgpt_discord_bot']  # Database name
 
 # Dictionary to keep track of user requests and their cooldowns
@@ -152,35 +153,27 @@ TOKEN = str(os.getenv("DISCORD_TOKEN"))
 
 # --- Database functions ---
 
-def get_history(user_id):
-    user_data = db.user_histories.find_one({'user_id': user_id})
-    if user_data and 'history' in user_data:
-        return user_data['history']
-    else:
-        return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
-    
-def save_history(user_id, history):
-    db.user_histories.update_one(
+async def get_history(user_id):
+    user_data = await db.user_histories.find_one({'user_id': user_id})
+    return user_data['history'] if user_data and 'history' in user_data else [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
+
+async def save_history(user_id, history):
+    await db.user_histories.update_one(
         {'user_id': user_id},
         {'$set': {'history': history}},
         upsert=True
     )
 
-# New function to get the user's model preference
-def get_user_model(user_id):
-    user_pref = db.user_preferences.find_one({'user_id': user_id})
-    if user_pref and 'model' in user_pref:
-        return user_pref['model']
-    else:
-        return "gpt-4o"  # Default to "gpt-4o" if no preference
+async def get_user_model(user_id):
+    user_pref = await db.user_preferences.find_one({'user_id': user_id})
+    return user_pref['model'] if user_pref and 'model' in user_pref else "gpt-4o"
 
-def save_user_model(user_id, model):
-    db.user_preferences.update_one(
+async def save_user_model(user_id, model):
+    await db.user_preferences.update_one(
         {'user_id': user_id},
         {'$set': {'model': model}},
         upsert=True
     )
-
 # Intents and bot initialization
 intents = discord.Intents.default()
 intents.message_content = True
@@ -505,8 +498,8 @@ async def handle_user_message(message: discord.Message):
 
 async def process_user_message(message: discord.Message):
     user_id = message.author.id
-    history = get_history(user_id)
-    model = get_user_model(user_id)
+    history = await get_history(user_id)
+    model = await get_user_model(user_id)
 
     # Initialize content list for the current message
     content = []
