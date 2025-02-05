@@ -107,7 +107,6 @@ statuses = [
     "Exploring AI in entertainment!",
     "Your gateway to AI innovation!",
 ]
-
 # List of available models
 MODEL_OPTIONS = [
     "gpt-4o",
@@ -349,7 +348,7 @@ async def web(interaction: discord.Interaction, url: str):
     """Scrapes a webpage and sends data to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
-    history = get_history(user_id)
+    history = await get_history(user_id)
 
     try:
         content = scrape_web_content(url)
@@ -390,8 +389,8 @@ async def reset(interaction: discord.Interaction):
 async def user_stat(interaction: discord.Interaction):
     """Fetches and displays the current input token, output token, and model for the user."""
     user_id = interaction.user.id
-    history = get_history(user_id)
-    model = get_user_model(user_id)
+    history = await get_history(user_id)
+    model = await get_user_model(user_id)
 
     # Handle cases where user model is not found
     if not model:
