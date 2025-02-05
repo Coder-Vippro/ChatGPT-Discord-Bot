@@ -1,27 +1,24 @@
 import os
 import discord
 import io
-import pymongo
-from discord.ext import commands, tasks
-from discord import app_commands
-from motor.motor_asyncio import AsyncIOMotorClient
-import requests
-from bs4 import BeautifulSoup
-import logging
-import sys
-from openai import OpenAI, RateLimitError
-import aiohttp
-from runware import Runware, IImageInference
-from collections import defaultdict
-import asyncio
-from PIL import Image
-from io import BytesIO
-from dotenv import load_dotenv
-from pymongo import MongoClient
-from flask import Flask, jsonify
 import threading
 import tiktoken
 import asyncio
+import requests
+import logging
+import sys
+import aiohttp
+from discord.ext import commands, tasks
+from discord import app_commands
+from motor.motor_asyncio import AsyncIOMotorClient
+from bs4 import BeautifulSoup
+from openai import OpenAI, RateLimitError
+from runware import Runware, IImageInference
+from collections import defaultdict
+from dotenv import load_dotenv
+from flask import Flask, jsonify
+
+# Load environment variables
 load_dotenv()
 
 # Flask app for health-check
@@ -110,6 +107,7 @@ statuses = [
     "Exploring AI in entertainment!",
     "Your gateway to AI innovation!",
 ]
+
 # List of available models
 MODEL_OPTIONS = [
     "gpt-4o",
@@ -174,6 +172,9 @@ async def save_user_model(user_id, model):
         {'$set': {'model': model}},
         upsert=True
     )
+
+# --- End of Database functions ---
+
 # Intents and bot initialization
 intents = discord.Intents.default()
 intents.message_content = True
@@ -493,9 +494,12 @@ async def on_message(message: discord.Message):
     else:
         await bot.process_commands(message)
 
+# Function to handle user messages
 async def handle_user_message(message: discord.Message):
+    # Offload processing to a non-blocking task
     asyncio.create_task(process_user_message(message)) 
 
+# Function to process user messages
 async def process_user_message(message: discord.Message):
     user_id = message.author.id
     history = await get_history(user_id)
@@ -557,9 +561,9 @@ async def process_user_message(message: discord.Message):
     # Prepare messages to send to API
     messages_to_send = history.copy()
 
-    if model in ["gpt-4o", "gpt-4o-mini", "o1"]:
+    if model in ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]:
         # If the model is "o1", rename "system" role to "developer"
-        if model == "o1":
+        if model == "o1" or model == "o3-mini":
             for msg in messages_to_send:
                 if msg["role"] == "system":
                     msg["role"] = "developer"
@@ -575,7 +579,6 @@ async def process_user_message(message: discord.Message):
                 if msg["role"] == "user" and isinstance(msg["content"], list):
                     for part in reversed(msg["content"]):
                         if part["type"] == "image_url":
-                            # Add 'details' key to each image
                             part["details"] = "high"
                             images.append(part)
                             if len(images) == n:
@@ -636,22 +639,21 @@ async def process_user_message(message: discord.Message):
         }
 
         if model in ["gpt-4o", "gpt-4o-mini"]:
-            # Include parameters for 'gpt-4o' models
             api_params.update({
                 "temperature": 0.3,
                 "max_tokens": 8096,
                 "top_p": 0.7,
             })
 
-        # Send messages to the API
-        response = client.chat.completions.create(**api_params)
-
+        # The non-blocking call, done in a background thread
+        response = await asyncio.to_thread(client.chat.completions.create, **api_params)
         reply = response.choices[0].message.content
         history.append({"role": "assistant", "content": reply})
         await save_history(user_id, history)
 
         await send_response(message.channel, reply)
 
+    # Handle rate limit errors
     except RateLimitError:
         error_message = (
             "Error: Rate limit exceeded for your model. "
@@ -660,23 +662,23 @@ async def process_user_message(message: discord.Message):
         logging.error(f"Rate limit error: {error_message}")
         await message.channel.send(error_message)
 
+    # Handle other exceptions
     except Exception as e:
         error_message = f"Error: {str(e)}"
         logging.error(f"Error handling user message: {error_message}")
         await message.channel.send(error_message)
         db.user_histories.delete_one({'user_id': user_id})
-        
-# Function to trim the history to avoid exceeding token limits
+
+# Function to get the remaining turns for each model
 def trim_history(history):
     """Trims the history to avoid exceeding token limits by removing older messages first."""
     tokens_used = sum(len(str(item['content'])) for item in history)
     max_tokens_allowed = 9000
-    # Remove from the front (oldest) while total tokens exceed limit
     while tokens_used > max_tokens_allowed and len(history) > 1:
         removed_item = history.pop(0)
         tokens_used -= len(str(removed_item['content']))
 
-# Function to send a response to the channel
+# Function to send response to the discord channel
 async def send_response(channel: discord.TextChannel, reply: str):
     """Sends the reply to the channel, handling long responses."""
     if len(reply) > 2000:
@@ -741,6 +743,7 @@ async def change_status():
             await bot.change_presence(activity=discord.Game(name=status))
             await asyncio.sleep(300)  # Change every 60 seconds
 
+# Event to run when the bot is ready
 @bot.event
 async def on_ready():
     """Bot startup event to sync slash commands and start status loop."""
