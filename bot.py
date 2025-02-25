@@ -58,7 +58,7 @@ client = OpenAI(
 
 )
 # Admin ID for whitelist commands
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+ADMIN_ID = str((os.getenv("ADMIN_ID")))
 
 # List of bot statuses
 statuses = [
