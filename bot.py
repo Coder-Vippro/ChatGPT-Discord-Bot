@@ -432,7 +432,6 @@ def scrape_web_content(url: str) -> str:
                     div_texts.append((d, len(d_text)))
             
             # Sort by content length and take the top 10
-            div_texts.sort(key=lambda x: x[1], reverse=True)
             if div_texts:
                 text_parts = []
                 for d, _ in div_texts[:10]:
@@ -868,10 +867,21 @@ async def on_message(message: discord.Message):
     else:
         await bot.process_commands(message)
 
-# Function to handle user messages
+user_tasks = {}
+
 async def handle_user_message(message: discord.Message):
-    # Offload processing to a non-blocking task
-    asyncio.create_task(process_user_message(message)) 
+    user_id = message.author.id
+    if user_id not in user_tasks:
+        user_tasks[user_id] = []
+    task = asyncio.create_task(process_user_message(message))
+    user_tasks[user_id].append(task)
+    task.add_done_callback(lambda t: user_tasks[user_id].remove(t))
+
+async def stop_user_tasks(user_id: int):
+    if user_id in user_tasks:
+        for task in user_tasks[user_id]:
+            task.cancel()
+        user_tasks[user_id] = []
 
 async def process_user_message(message: discord.Message):
     try:
@@ -1017,6 +1027,9 @@ async def process_user_message(message: discord.Message):
         error_message = f"Error: {str(e)}"
         logging.error(f"Error in message handling: {error_message}")
         await message.channel.send(error_message)
+    finally:
+        if user_id in user_tasks:
+            user_tasks[user_id] = [task for task in user_tasks[user_id] if not task.done()]
 
 async def process_batch(model: str, user_prompt: str, batch_content: str, current_batch: int, total_batches: int, channel, max_retries=3) -> bool:
     """Process a single batch of PDF content with auto-adjustment for token limits."""
@@ -1215,6 +1228,19 @@ async def process_pdf(message: discord.Message, pdf_content: bytes, user_prompt:
         total_pages = len(pages_content)
         current_batch_size = PDF_BATCH_SIZE
         processed_pages = 0
+
+        # Handle single-page PDF
+        if total_pages == 1:
+            batch_content = f"\nPDF Page 1:\n{pages_content[0]['content']}\n"
+            await process_pdf_batch(
+                model=model,
+                user_prompt=user_prompt,
+                batch_content=batch_content,
+                current_batch=1,
+                total_batches=1,
+                channel=message.channel
+            )
+            return
         
         while current_batch_size > 0 and processed_pages < total_pages:
             try:
@@ -1412,6 +1438,19 @@ async def blacklist_remove(interaction: discord.Interaction, user_id: str):
             await interaction.response.send_message(f"User {user_id} was not found in the blacklist.", ephemeral=True)
     except ValueError:
         await interaction.response.send_message("Invalid user ID. Please provide a valid Discord user ID.", ephemeral=True)
+
+@tree.command(name="stop", description="Stop any process or queue of the user. Admins can stop other users' tasks by providing their ID.")
+@app_commands.describe(user_id="The Discord user ID to stop tasks for (admin only)")
+async def stop(interaction: discord.Interaction, user_id: str = None):
+    """Stops any process or queue of the user. Admins can stop other users' tasks by providing their ID."""
+    if user_id and not await is_admin(interaction.user.id):
+        await interaction.response.send_message("You don't have permission to stop other users' tasks.", ephemeral=True)
+        return
+    
+    target_user_id = int(user_id) if user_id else interaction.user.id
+    
+    await stop_user_tasks(target_user_id)
+    await interaction.followup.send(f"Stopped all tasks for user {target_user_id}.", ephemeral=True)
 
 # Task to change status every minute
 @tasks.loop(minutes=5)
