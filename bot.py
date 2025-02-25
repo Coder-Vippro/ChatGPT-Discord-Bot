@@ -1443,8 +1443,11 @@ async def blacklist_remove(interaction: discord.Interaction, user_id: str):
 @app_commands.describe(user_id="The Discord user ID to stop tasks for (admin only)")
 async def stop(interaction: discord.Interaction, user_id: str = None):
     """Stops any process or queue of the user. Admins can stop other users' tasks by providing their ID."""
+    # Defer the interaction first
+    await interaction.response.defer(ephemeral=True)
+    
     if user_id and not await is_admin(interaction.user.id):
-        await interaction.response.send_message("You don't have permission to stop other users' tasks.", ephemeral=True)
+        await interaction.followup.send("You don't have permission to stop other users' tasks.", ephemeral=True)
         return
     
     target_user_id = int(user_id) if user_id else interaction.user.id
