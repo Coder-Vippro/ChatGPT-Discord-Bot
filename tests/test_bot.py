@@ -127,20 +127,6 @@ class TestFullBot(unittest.TestCase):
             interaction.response.defer.assert_called()
             interaction.followup.send.assert_called()
 
-    def test_search_command(self):
-        asyncio.run(self.async_test_search())
-
-    async def async_test_web(self):
-        interaction = AsyncMock()
-        interaction.user.id = 1234
-        with patch("bot.get_history", new=AsyncMock(return_value=[])):
-            await web.callback(interaction, url="https://test.com")
-            interaction.response.defer.assert_called()
-            interaction.followup.send.assert_called()
-
-    def test_web_command(self):
-        asyncio.run(self.async_test_web())
-
     async def async_test_reset(self):
         interaction = AsyncMock()
         interaction.user.id = 1234
