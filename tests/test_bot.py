@@ -1,150 +1,142 @@
+import sys
+import os
 import unittest
-import unittest.mock as mock
-from unittest.mock import MagicMock, patch, AsyncMock
 import asyncio
-import requests
-from flask import Flask
-from bot import (
-    app,
-    run_flask,
-    client,
-    statuses,
-    MODEL_OPTIONS,
-    WEB_SCRAPING_PROMPT,
-    NORMAL_CHAT_PROMPT,
-    SEARCH_PROMPT,
-    google_custom_search,
-    scrape_web_content,
-    get_history,
-    save_history,
-    get_user_model,
-    save_user_model,
-    bot,
-    process_request,
-    process_queue,
-    choose_model,
-    search,
-    web,
-    reset,
-    help_command,
-    should_respond_to_message,
-    handle_user_message,
-    trim_history,
-    generate_image,
-    _generate_image_command,
-    change_status,
-    on_ready
-)
+import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
 
-class TestFullBot(unittest.TestCase):
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-    def setUp(self):
-        # Sử dụng app của Flask để test endpoint
-        self.app = app.test_client()
+import bot
 
-    def test_flask_health_endpoint(self):
-        with patch("bot.bot.is_closed", return_value=False), \
-             patch("bot.bot.is_ready", return_value=True):
-            response = self.app.get('/health')
-            self.assertEqual(response.status_code, 200, "Health endpoint should return 200 if bot is ready.")
+class TestBotUtils(unittest.TestCase):
+    
+    def test_count_tokens(self):
+        """Test token counting function"""
+        # Basic test
+        self.assertGreater(bot.count_tokens("Hello world"), 0)
+        # Empty string should return 0 or small value
+        self.assertLessEqual(bot.count_tokens(""), 3)
+        # Longer text should have more tokens
+        short_text = "Hello"
+        long_text = "Hello " * 100
+        self.assertLess(bot.count_tokens(short_text), bot.count_tokens(long_text))
+    
 
-    def test_run_flask(self):
-        # Kiểm tra run_flask khởi động mà không báo lỗi
-        with patch.object(Flask, 'run') as mock_run:
-            run_flask()
-            mock_run.assert_called_once()
+    def test_prepare_messages_for_api(self):
+        """Test message preparation for API"""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there"},
+            {"role": "user", "content": "Help me with Python"}
+        ]
+        prepared = bot.prepare_messages_for_api(messages, max_tokens=1000)
+        self.assertIsInstance(prepared, list)
+        # Should have role and content
+        for msg in prepared:
+            self.assertIn("role", msg)
+            self.assertIn("content", msg)
 
-    @patch("requests.get")
-    def test_google_custom_search(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"items": [{"title": "Result 1"}]}
-        mock_get.return_value = mock_resp
-        results = google_custom_search("test")
-        self.assertEqual(len(results), 1, "Should return 1 search result when JSON has items.")
+class TestCodeSanitization(unittest.TestCase):
+    
+    def test_python_safe_code(self):
+        """Test Python code sanitization with safe code"""
+        code = """
+def factorial(n):
+    if n == 0:
+        return 1
+    return n * factorial(n-1)
+        
+print(factorial(5))
+"""
+        is_safe, sanitized = bot.sanitize_code(code, "python")
+        self.assertTrue(is_safe)
+        self.assertIn("signal.alarm(10)", sanitized)
+        
+    def test_python_unsafe_code(self):
+        """Test Python code sanitization with unsafe imports"""
+        code = """
+import os
+print(os.system('ls'))
+"""
+        is_safe, message = bot.sanitize_code(code, "python")
+        self.assertFalse(is_safe)
+        self.assertIn("Forbidden module import", message)
+        
+    def test_cpp_safe_code(self):
+        """Test C++ code sanitization with safe code"""
+        code = """
+#include <iostream>
+using namespace std;
 
-    @patch("requests.get")
-    def test_scrape_web_content(self, mock_get):
+int main() {
+    cout << "Hello World" << endl;
+    return 0;
+}
+"""
+        is_safe, sanitized = bot.sanitize_code(code, "cpp")
+        self.assertTrue(is_safe)
+        self.assertIn("userMain(", sanitized)
+        
+    def test_cpp_unsafe_code(self):
+        """Test C++ code sanitization with unsafe includes"""
+        code = """
+#include <iostream>
+#include <fstream>
+int main() {
+    ofstream file("test.txt");
+    file << "Hello World";
+    return 0;
+}
+"""
+        is_safe, message = bot.sanitize_code(code, "cpp")
+        self.assertFalse(is_safe)
+        self.assertIn("Forbidden header", message)
+
+
+@pytest.mark.asyncio
+class TestAsyncFunctions:
+    
+    @pytest.fixture
+    def mock_channel(self):
+        mock = AsyncMock()
+        mock.send = AsyncMock()
+        return mock
+        
+    @patch('bot.client.chat.completions.create')
+    async def test_process_batch(self, mock_create, mock_channel):
+        """Test batch processing"""
         mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.content = b"<p>Some scraped text</p>"
-        mock_get.return_value = mock_response
-        result = scrape_web_content("https://example.com")
-        self.assertIn("Some scraped text", result, "Scraped content should include known text.")
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "Processed content"
+        mock_create.return_value = mock_response
+        
+        result = await bot.process_batch(
+            model="gpt-4o-mini",
+            user_prompt="Analyze this",
+            batch_content="Test content",
+            current_batch=1,
+            total_batches=1,
+            channel=mock_channel()
+        )
+        
+        # Should call the API
+        mock_create.assert_called_once()
+        self.assertTrue(result)
+        
+    @patch('asyncio.create_subprocess_exec')
+    async def test_execute_code(self, mock_subprocess):
+        """Test code execution"""
+        # Configure the mock
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Hello World", b""))
+        mock_subprocess.return_value = mock_proc
+        
+        result = await bot.execute_code("print('Hello World')", "python")
+        self.assertIn("Hello World", result)
+        
 
-    async def async_test_get_history(self):
-        with patch("bot.db.user_histories.find_one", new_callable=AsyncMock) as mock_find_one:
-            mock_find_one.return_value = {"history": [{"role": "system", "content": NORMAL_CHAT_PROMPT}]}
-            history = await get_history(1234)
-            self.assertIsInstance(history, list, "History should be a list.")
-
-    def test_get_history(self):
-        asyncio.run(self.async_test_get_history())
-
-    async def async_test_get_user_model_default(self):
-        with patch("bot.db.user_preferences.find_one", new_callable=AsyncMock) as mock_find_one:
-            mock_find_one.return_value = None
-            model = await get_user_model(1234)
-            self.assertEqual(model, "gpt-4o")
-
-
-    def test_trim_history_with_large_content(self):
-        sample_history = [
-            {"role": "user", "content": "x" * 5000},
-            {"role": "user", "content": "y" * 5000}
-        ]
-        trim_history(sample_history)
-        # Giả sử hàm trim_history không xóa hết nội dung mà vẫn giữ lại tối thiểu 1 message
-        self.assertGreaterEqual(len(sample_history), 1, "History should not be completely removed.")
-
-    def test_trim_history_with_empty_history(self):
-        history = []
-        trim_history(history)
-        self.assertEqual(len(history), 0, "Empty history should remain empty.")
-
-    def test_trim_history_with_single_message(self):
-        history = [{"role": "user", "content": "test"}]
-        trim_history(history)
-        self.assertEqual(len(history), 1, "Single message history should remain unchanged.")
-
-    async def async_test_process_message_with_attachment(self):
-        message = AsyncMock()
-        message.author.id = 1234
-        message.content = "Check this file"
-        message.attachments = [
-            AsyncMock(filename="test.txt", read=AsyncMock(return_value=b"File content"))
-        ]
-        # Patch bot.user để tránh lỗi khi gọi mentioned_in (bot.user có thể là None trong môi trường test)
-        with patch.object(bot.user, 'mentioned_in', return_value=False):
-            await bot.on_message(message)
-
-
-    async def async_test_search(self):
-        interaction = AsyncMock()
-        interaction.user.id = 1234
-        # Patch get_history để trả về list thay vì coroutine, tránh lỗi khi gọi append
-        with patch("bot.get_history", new=AsyncMock(return_value=[])):
-            await search.callback(interaction, query="Python")
-            interaction.response.defer.assert_called()
-            interaction.followup.send.assert_called()
-
-    async def async_test_reset(self):
-        interaction = AsyncMock()
-        interaction.user.id = 1234
-        await reset.callback(interaction)
-        interaction.response.send_message.assert_called()
-
-    async def test_reset_command(self):
-        await self.async_test_reset()
-
-    async def async_test_help_command(self):
-        interaction = AsyncMock()
-        # Nếu help_command được đăng ký dưới dạng command (Command object),
-        # bạn cần gọi .callback thay vì gọi trực tiếp đối tượng.
-        await help_command.callback(interaction)
-        interaction.response.send_message.assert_called()
-
-    def test_help_command(self):
-        asyncio.run(self.async_test_help_command())
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

@@ -1481,7 +1481,10 @@ def sanitize_code(code, language):
     # Check for banned operations
     for banned_op in banned_list:
         if banned_op in code:
-            return False, f"Forbidden operation detected: '{banned_op}'"
+            if language == 'python':
+                return False, f"Forbidden module import: {banned_op}"
+            else:
+                return False, f"Forbidden header include: {banned_op}"
     
     # Specific checks for Python
     if language == 'python':
