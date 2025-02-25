@@ -393,9 +393,7 @@ def scrape_web_content(url: str) -> str:
             if main_content:
                 break
                 
-            if container.startswith('.'):
-                elements = soup.select(container)
-            elif container.startswith('#'):
+            if container.startswith('.') or container.startswith('#'):
                 elements = soup.select(container)
             else:
                 elements = soup.find_all(container)
@@ -406,6 +404,8 @@ def scrape_web_content(url: str) -> str:
         # If we found a main content container, extract text from it
         if main_content:
             text = main_content.get_text(separator=' ', strip=True)
+            if text and len(text) > 10:  # Adjusted to consider shorter meaningful content
+                return text
             if text and len(text) > 100:
                 return text
 
@@ -1473,7 +1473,7 @@ def sanitize_code(code, language):
     
     # Check if code is empty
     if not code.strip():
-        return False, "Code is empty."
+        return True, "Code is empty."
     
     # Determine which banned list to use
     banned_list = python_banned if language == 'python' else cpp_banned
