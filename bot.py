@@ -187,7 +187,7 @@ async def save_user_model(user_id, model):
 
 async def is_admin(user_id: int) -> bool:
     """Check if a user is an admin."""
-    return user_id == ADMIN_ID
+    return str(user_id) == ADMIN_ID
 
 async def is_user_whitelisted(user_id):
     """Check if a user is whitelisted for PDF processing."""
@@ -595,7 +595,7 @@ async def process_user_message(message: discord.Message):
                 if attachment.filename.lower().endswith('.pdf'):
                     # Check if user is whitelisted (skip for admins)
                     if not is_admin_user and not await is_user_whitelisted(user_id):
-                        await message.channel.send(f"You are not authorized to use PDF processing. Please contact admin (ID: {ADMIN_ID}) to get whitelisted using the /whitelist_add command.")
+                        await message.channel.send(f"You are not authorized to use PDF processing. Please contact admin (ID: {str(ADMIN_ID)}) to get whitelisted using the /whitelist_add command.")
                         return
                         
                     # Admins can use any model for PDF processing
@@ -987,7 +987,7 @@ async def _generate_image_command(interaction: discord.Interaction, prompt: str)
 @app_commands.describe(user_id="The Discord user ID to whitelist")
 async def whitelist_add(interaction: discord.Interaction, user_id: str):
     """Adds a user to the PDF processing whitelist."""
-    if interaction.user.id != ADMIN_ID:
+    if str(interaction.user.id) != ADMIN_ID:
         await interaction.response.send_message("You don't have permission to use this command. Only admin can use whitelist commands.", ephemeral=True)
         return
     
@@ -1005,7 +1005,7 @@ async def whitelist_add(interaction: discord.Interaction, user_id: str):
 @app_commands.describe(user_id="The Discord user ID to remove from whitelist")
 async def whitelist_remove(interaction: discord.Interaction, user_id: str):
     """Removes a user from the PDF processing whitelist."""
-    if interaction.user.id != ADMIN_ID:
+    if str(interaction.user.id) != ADMIN_ID:
         await interaction.response.send_message("You don't have permission to use this command. Only admin can use whitelist commands.", ephemeral=True)
         return
     
@@ -1022,7 +1022,7 @@ async def whitelist_remove(interaction: discord.Interaction, user_id: str):
 @app_commands.describe(user_id="The Discord user ID to blacklist")
 async def blacklist_add(interaction: discord.Interaction, user_id: str):
     """Adds a user to the bot blacklist."""
-    if interaction.user.id != ADMIN_ID:
+    if str(interaction.user.id) != ADMIN_ID:
         await interaction.response.send_message("You don't have permission to use this command. Only admin can use blacklist commands.", ephemeral=True)
         return
     
@@ -1040,7 +1040,7 @@ async def blacklist_add(interaction: discord.Interaction, user_id: str):
 @app_commands.describe(user_id="The Discord user ID to remove from blacklist")
 async def blacklist_remove(interaction: discord.Interaction, user_id: str):
     """Removes a user from the bot blacklist."""
-    if interaction.user.id != ADMIN_ID:
+    if str(interaction.user.id) != ADMIN_ID:
         await interaction.response.send_message("You don't have permission to use this command. Only admin can use blacklist commands.", ephemeral=True)
         return
     
