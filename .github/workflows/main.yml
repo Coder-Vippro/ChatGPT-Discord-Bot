@@ -110,4 +110,5 @@ jobs:
             -e GOOGLE_CX="${{ secrets.GOOGLE_CX }}" \
             -e OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL }}" \
             -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            -e ADMIN_ID="${{ secrets.ADMIN_ID }}" \
             $IMAGE_NAME:$IMAGE_TAG

@@ -39,8 +39,9 @@ To get started, ensure you have:
      RUNWARE_API_KEY=your_runware_api_key
      GOOGLE_API_KEY=your_google_api_key
      GOOGLE_CX=your_google_cx
-     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
+     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any openai compatible api else you want
      MONGODB_URI=mongodb://localhost:27017/
+     ADMIN_ID=your_discord_user_id
      ```
    - Use the following `docker-compose.yml`:
      ```yaml
@@ -71,8 +72,9 @@ To get started, ensure you have:
      RUNWARE_API_KEY=your_runware_api_key
      GOOGLE_API_KEY=your_google_api_key
      GOOGLE_CX=your_google_cx
-     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any api else you want
+     OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any openai compatible api else you want
      MONGODB_URI=mongodb://localhost:27017/
+     ADMIN_ID=your_discord_user_id
      ```
    - Install the dependencies:
      ```bash

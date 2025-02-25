@@ -17,9 +17,14 @@ from runware import Runware, IImageInference
 from collections import defaultdict
 from dotenv import load_dotenv
 from flask import Flask, jsonify
+from PyPDF2 import PdfReader
+import io
 
 # Load environment variables
 load_dotenv()
+
+# Supported file types for text processing
+supported_file_types = ['.txt', '.py', '.js', '.html', '.css', '.json', '.md', '.log', '.csv', '.xml', '.yml', '.yaml', '.ini', '.cfg', '.conf']
 
 # Flask app for health-check
 app = Flask(__name__)
@@ -50,7 +55,10 @@ def run_flask():
 client = OpenAI(
     base_url=str(os.getenv("OPENAI_BASE_URL")),
     api_key=str(os.getenv("OPENAI_API_KEY")),
+
 )
+# Admin ID for whitelist commands
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 # List of bot statuses
 statuses = [
@@ -117,6 +125,8 @@ MODEL_OPTIONS = [
     "o3-mini"
 ]
 
+PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]
+
 # Prompt for different plugins
 WEB_SCRAPING_PROMPT = "You are using the Web Scraping Plugin, gathering information from given url. Respond accurately and combine data to provide a clear, insightful summary. "
 NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You can chat, generate images, and perform searches. Craft responses that are easy to copy directly into Discord chats, without using markdown, code blocks, or extra formatting. When you solving any problems you must remember that: Let's solve this step-by-step. What information do we need to find? What operation might help us solve this? Explain your reasoning and provide the answer."
@@ -131,6 +141,9 @@ RUNWARE_API_KEY = str(os.getenv("RUNWARE_API_KEY"))
 
 #MongoDB URI
 MONGODB_URI = str(os.getenv("MONGODB_URI"))
+
+# Số lượng ảnh được xử lý cùng lúc cho PDF
+PDF_BATCH_SIZE = 3
 
 # Initialize Runware SDK
 runware = Runware(api_key=RUNWARE_API_KEY)
@@ -171,6 +184,50 @@ async def save_user_model(user_id, model):
         {'$set': {'model': model}},
         upsert=True
     )
+
+async def is_admin(user_id: int) -> bool:
+    """Check if a user is an admin."""
+    return user_id == ADMIN_ID
+
+async def is_user_whitelisted(user_id):
+    """Check if a user is whitelisted for PDF processing."""
+    if await is_admin(user_id):
+        return True
+    whitelist = await db.pdf_whitelist.find_one({'user_id': user_id})
+    return bool(whitelist)
+
+async def add_user_to_whitelist(user_id):
+    """Add a user to the PDF processing whitelist."""
+    await db.pdf_whitelist.update_one(
+        {'user_id': user_id},
+        {'$set': {'whitelisted': True}},
+        upsert=True
+    )
+
+async def remove_user_from_whitelist(user_id):
+    """Remove a user from the PDF processing whitelist."""
+    result = await db.pdf_whitelist.delete_one({'user_id': user_id})
+    return result.deleted_count > 0
+
+async def add_user_to_blacklist(user_id):
+    """Add a user to the bot blacklist."""
+    await db.bot_blacklist.update_one(
+        {'user_id': user_id},
+        {'$set': {'blacklisted': True}},
+        upsert=True
+    )
+
+async def remove_user_from_blacklist(user_id):
+    """Remove a user from the bot blacklist."""
+    result = await db.bot_blacklist.delete_one({'user_id': user_id})
+    return result.deleted_count > 0
+
+async def is_user_blacklisted(user_id):
+    """Check if a user is blacklisted from using the bot."""
+    if await is_admin(user_id):
+        return False
+    blacklist = await db.bot_blacklist.find_one({'user_id': user_id})
+    return bool(blacklist)
 
 # --- End of Database functions ---
 
@@ -274,6 +331,10 @@ async def process_queue(interaction):
 # Slash command to let users choose a model and save it to the database
 @tree.command(name="choose_model", description="Select the AI model to use for responses.")
 async def choose_model(interaction: discord.Interaction):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     options = [discord.SelectOption(label=model, value=model) for model in MODEL_OPTIONS]
     select_menu = discord.ui.Select(placeholder="Choose a model", options=options)
 
@@ -296,6 +357,10 @@ async def choose_model(interaction: discord.Interaction):
 @tree.command(name="search", description="Search on Google and send results to AI model.")
 @app_commands.describe(query="The search query")
 async def search(interaction: discord.Interaction, query: str):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     """Searches Google and sends results to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
@@ -345,6 +410,10 @@ async def search(interaction: discord.Interaction, query: str):
 @tree.command(name="web", description="Scrape a webpage and send data to AI model.")
 @app_commands.describe(url="The webpage URL to scrape")
 async def web(interaction: discord.Interaction, url: str):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     """Scrapes a webpage and sends data to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
@@ -363,7 +432,6 @@ async def web(interaction: discord.Interaction, url: str):
             model="gpt-4o",
             messages=history,
             temperature=0.3,
-            max_tokens=4096,
             top_p=0.7
         )
 
@@ -379,6 +447,10 @@ async def web(interaction: discord.Interaction, url: str):
 # Reset user chat history from database
 @tree.command(name="reset", description="Reset the bot by clearing user data.")
 async def reset(interaction: discord.Interaction):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     """Resets the bot by clearing user data."""
     user_id = interaction.user.id
     db.user_histories.delete_one({'user_id': user_id})
@@ -387,6 +459,10 @@ async def reset(interaction: discord.Interaction):
 # Slash command for user statistics (/user_stat)
 @tree.command(name="user_stat", description="Get your current input token, output token, and model.")
 async def user_stat(interaction: discord.Interaction):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     """Fetches and displays the current input token, output token, and model for the user."""
     user_id = interaction.user.id
     history = await get_history(user_id)
@@ -498,175 +574,343 @@ async def handle_user_message(message: discord.Message):
     # Offload processing to a non-blocking task
     asyncio.create_task(process_user_message(message)) 
 
-# Function to process user messages
 async def process_user_message(message: discord.Message):
-    user_id = message.author.id
-    history = await get_history(user_id)
-    model = await get_user_model(user_id)
-
-    # Initialize content list for the current message
-    content = []
-
-    # Add message content if present
-    if message.content:
-        content.append({"type": "text", "text": message.content})
-
-    # Supported text/code file extensions
-    supported_file_types = [
-        ".txt", ".json", ".py", ".cpp", ".js", ".html",
-        ".css", ".xml", ".md", ".java", ".cs",
-        ".rb", ".go", ".ts", ".swift", ".kt",
-        ".php", ".sh", ".bat", ".pl", ".r",
-        ".sql", ".yaml", ".yml", ".ini", ".cfg",
-        ".tex", ".csv", ".log", ".lua", ".scala",
-        ".hs", ".erl", ".ex", ".clj", ".jsx",
-        ".tsx", ".vue", ".svelte", ".dart", ".m",
-        ".groovy", ".ps1", ".vb", ".asp", ".aspx",
-        ".jsp", ".dart", ".coffee", ".nim", ".vala",
-        ".fish", ".zsh", ".csh", ".tcsh", ".mk",
-        ".make", ".Dockerfile", ".env", ".graphql",
-        ".twig", ".hbs", ".liquid"
-    ]
-
-    # Process attachments if any
-    image_urls = []
-    if message.attachments:
-        attachments = message.attachments
-        for attachment in attachments:
-            if any(attachment.filename.endswith(ext) for ext in supported_file_types):
-                file_content = await attachment.read()
-                try:
-                    user_message_content = file_content.decode("utf-8")
-                    content.append({"type": "text", "text": user_message_content})
-                except UnicodeDecodeError:
-                    await message.channel.send("Error: The file appears to be binary data, not a text file.")
-                    return
-            else:
-                image_urls.append(attachment.url)
-                # Add image URLs to content
-                content.append({"type": "image_url", "image_url": {"url": attachment.url}})
-
-    # If no content was added, add a default message
-    if not content and not image_urls:
-        content.append({"type": "text", "text": "No content."})
-
-    # Prepare the current message
-    current_message = {"role": "user", "content": content}
-    history.append(current_message)
-
-    # Trim history before sending to OpenAI
-    trim_history(history)
-
-    # Prepare messages to send to API
-    messages_to_send = history.copy()
-
-    if model in ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]:
-        # If the model is "o1", rename "system" role to "developer"
-        if model == "o1" or model == "o3-mini":
-            for msg in messages_to_send:
-                if msg["role"] == "system":
-                    msg["role"] = "developer"
-        elif model != "o1":
-            for msg in messages_to_send:
-                if msg["role"] == "developer":
-                    msg["role"] = "system"
-
-        # Include up to 10 previous images
-        def get_last_n_images(history, n=10):
-            images = []
-            for msg in reversed(history):
-                if msg["role"] == "user" and isinstance(msg["content"], list):
-                    for part in reversed(msg["content"]):
-                        if part["type"] == "image_url":
-                            part["details"] = "high"
-                            images.append(part)
-                            if len(images) == n:
-                                return images[::-1]
-            return images[::-1]
-
-        # Get the last 10 images
-        latest_images = get_last_n_images(history, n=10)
-
-        if latest_images:
-            # Remove existing images from the last message
-            last_message = messages_to_send[-1]
-            if last_message["role"] == "user" and isinstance(last_message["content"], list):
-                last_message["content"] = [
-                    part for part in last_message["content"] if part["type"] != "image_url"
-                ]
-                last_message["content"].extend(latest_images)
-            else:
-                last_message["content"] = [{"type": "text", "text": last_message["content"]}]
-                last_message["content"].extend(latest_images)
-            messages_to_send[-1] = last_message
-
-        # Fix the 431 error by limiting the number of images
-        max_images = 10
-        total_images = 0
-        for msg in messages_to_send:
-            if msg["role"] == "user" and isinstance(msg["content"], list):
-                image_parts = [part for part in msg["content"] if part.get("type") == "image_url"]
-                total_images += len(image_parts)
-        if total_images > max_images:
-            images_removed = 0
-            for msg in messages_to_send:
-                if msg["role"] == "user" and isinstance(msg["content"], list):
-                    new_content = []
-                    for part in msg["content"]:
-                        if part.get("type") == "image_url" and images_removed < (total_images - max_images):
-                            images_removed += 1
-                            continue
-                        new_content.append(part)
-                    msg["content"] = new_content
-
-    else:
-        # Exclude image URLs and system prompts for other models
-        for msg in messages_to_send:
-            if msg["role"] == "user" and isinstance(msg["content"], list):
-                msg["content"] = [
-                    part for part in msg["content"] if part["type"] != "image_url"
-                ]
-        messages_to_send = [
-            msg for msg in messages_to_send if msg.get("role") != "system"
-        ]
-
     try:
-        # Prepare API call parameters
-        api_params = {
-            "model": model,
-            "messages": messages_to_send,
-        }
+        user_id = message.author.id
+        
+        # Admins bypass all restrictions
+        is_admin_user = await is_admin(user_id)
+        
+        # Check if user is blacklisted (skip for admins)
+        if not is_admin_user and await is_user_blacklisted(user_id):
+            await message.channel.send("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.")
+            return
+            
+        history = await get_history(user_id)
+        model = await get_user_model(user_id)
 
-        if model in ["gpt-4o", "gpt-4o-mini"]:
-            api_params.update({
-                "temperature": 0.3,
-                "max_tokens": 8096,
-                "top_p": 0.7,
-            })
+        # Handle PDF files first
+        if message.attachments:
+            for attachment in message.attachments:
+                if attachment.filename.lower().endswith('.pdf'):
+                    # Check if user is whitelisted (skip for admins)
+                    if not is_admin_user and not await is_user_whitelisted(user_id):
+                        await message.channel.send(f"You are not authorized to use PDF processing. Please contact admin (ID: {ADMIN_ID}) to get whitelisted using the /whitelist_add command.")
+                        return
+                        
+                    # Admins can use any model for PDF processing
+                    if not is_admin_user and model not in PDF_ALLOWED_MODELS:
+                        await message.channel.send(f"Error: PDF processing is only available with models: {', '.join(PDF_ALLOWED_MODELS)}. Please use /choose_model to switch to one of these models. Your current model: {model}")
+                        return
+                        
+                    # Get user's prompt or use default if none provided
+                    user_prompt = message.content.strip() if message.content else "Please analyze this PDF document"
+                    
+                    pdf_content = await attachment.read()
+                    await process_pdf(message, pdf_content, user_prompt, model)
+                    return
 
-        # The non-blocking call, done in a background thread
-        response = await asyncio.to_thread(client.chat.completions.create, **api_params)
-        reply = response.choices[0].message.content
-        history.append({"role": "assistant", "content": reply})
-        await save_history(user_id, history)
+        # Handle normal messages and non-PDF attachments
+        content = []
+        
+        # Add message content if present
+        if message.content:
+            content.append({"type": "text", "text": message.content})
 
-        await send_response(message.channel, reply)
+        # Process attachments
+        if message.attachments:
+            for attachment in message.attachments:
+                if any(attachment.filename.endswith(ext) for ext in supported_file_types):
+                    file_content = await attachment.read()
+                    try:
+                        text_content = file_content.decode("utf-8")
+                        content.append({"type": "text", "text": text_content})
+                    except UnicodeDecodeError:
+                        await message.channel.send("Error: The file appears to be binary data, not a text file.")
+                        return
+                else:
+                    content.append({"type": "image_url", "image_url": {"url": attachment.url}})
 
-    # Handle rate limit errors
-    except RateLimitError:
-        error_message = (
-            "Error: Rate limit exceeded for your model. "
-            "Please try again later or use /choose_model to change to any models else."
-        )
-        logging.error(f"Rate limit error: {error_message}")
-        await message.channel.send(error_message)
+        if not content:
+            content.append({"type": "text", "text": "No content."})
 
-    # Handle other exceptions
+        # Prepare current message and add to history
+        current_message = {"role": "user", "content": content}
+        
+        try:
+            # Prepare messages for API while ensuring token limit
+            messages_for_api = []
+            
+            if model in ["gpt-4o", "gpt-4o-mini"]:
+                # For these models, we keep some history but ensure token limits
+                history.append(current_message)
+                messages_for_api = prepare_messages_for_api(history)
+            else:
+                # For other models, we just use the current message
+                messages_for_api = prepare_messages_for_api([current_message])
+
+            # Prepare API call parameters
+            api_params = {
+                "model": model,
+                "messages": messages_for_api,
+                "temperature": 0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                "max_tokens": 8096 if model in ["gpt-4o", "gpt-4o-mini"] else 4096,
+                "top_p": 0.7 if model in ["gpt-4o", "gpt-4o-mini"] else 1
+            }
+
+            # Make the API call
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                **api_params
+            )
+            
+            reply = response.choices[0].message.content
+            
+            # Only update history for successful calls
+            if model in ["gpt-4o", "gpt-4o-mini"]:
+                history.append({"role": "assistant", "content": reply})
+                await save_history(user_id, history)
+
+            await send_response(message.channel, reply)
+
+        except RateLimitError:
+            await message.channel.send(
+                "Error: Rate limit exceeded for your model. "
+                "Please try again later or use /choose_model to change to any models else."
+            )
+
+        except Exception as e:
+            error_message = f"Error: {str(e)}"
+            logging.error(f"Error in message processing: {error_message}")
+            await message.channel.send(error_message)
+            
     except Exception as e:
         error_message = f"Error: {str(e)}"
-        logging.error(f"Error handling user message: {error_message}")
+        logging.error(f"Error in message handling: {error_message}")
         await message.channel.send(error_message)
-        db.user_histories.delete_one({'user_id': user_id})
+
+async def process_batch(model: str, user_prompt: str, batch_content: str, current_batch: int, total_batches: int, channel, max_retries=3) -> bool:
+    """Process a single batch of PDF content with auto-adjustment for token limits."""
+    for attempt in range(max_retries):
+        try:
+            # Create fresh history for each batch to avoid accumulation
+            messages = [
+                {"role": "user", "content": f"{user_prompt}\n\nAnalyze the following pages:\n{batch_content}"}
+            ]
+            
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=1,
+                max_tokens=8096
+            )
+            
+            reply = response.choices[0].message.content
+            batch_response = f"Batch {current_batch}/{total_batches}:\n{reply}"
+            await send_response(channel, batch_response)
+            return True
+            
+        except Exception as e:
+            error_str = str(e)
+            if "413" in error_str and attempt < max_retries - 1:
+                # Split the batch content in half and try again
+                content_parts = batch_content.split("\n")
+                mid = len(content_parts) // 2
+                batch_content = "\n".join(content_parts[:mid])
+                continue
+            elif attempt == max_retries - 1:
+                await channel.send(f"Error processing batch {current_batch}: {str(e)}")
+                return False
+    return False
+
+def count_tokens(text: str) -> int:
+    """Estimate token count using a simple approximation."""
+    # Rough estimate: 1 word ≈ 1.3 tokens
+    return int(len(text.split()) * 1.3)
+
+def trim_content_to_token_limit(content: str, max_tokens: int = 7500) -> str:
+    """Trim content to stay within token limit while preserving the most recent content."""
+    current_tokens = count_tokens(content)
+    if current_tokens <= max_tokens:
+        return content
+        
+    # Split into lines and start removing from the beginning until under limit
+    lines = content.split('\n')
+    while lines and count_tokens('\n'.join(lines)) > max_tokens:
+        lines.pop(0)
+    
+    if not lines:  # If still too long, take the last part
+        text = content
+        while count_tokens(text) > max_tokens:
+            text = text[text.find('\n', 1000):]
+        return text
+        
+    return '\n'.join(lines)
+
+def prepare_messages_for_api(messages, max_tokens=7500):
+    """Prepare messages for API while ensuring token limit."""
+    total_tokens = 0
+    prepared_messages = []
+    
+    # Process messages in reverse order to keep the most recent ones
+    for msg in reversed(messages):
+        msg_content = msg['content']
+        # Convert complex content to text for token counting
+        if isinstance(msg_content, list):
+            text_content = ""
+            for item in msg_content:
+                if item['type'] == 'text':
+                    text_content += item['text'] + "\n"
+            msg_tokens = count_tokens(text_content)
+            if total_tokens + msg_tokens > max_tokens:
+                # Trim the content
+                trimmed_text = trim_content_to_token_limit(text_content, max_tokens - total_tokens)
+                if trimmed_text:
+                    new_content = [{"type": "text", "text": trimmed_text}]
+                    # Preserve any image URLs from the original content
+                    for item in msg_content:
+                        if item['type'] == 'image_url':
+                            new_content.append(item)
+                    prepared_messages.insert(0, {"role": msg["role"], "content": new_content})
+                break
+            else:
+                prepared_messages.insert(0, msg)
+                total_tokens += msg_tokens
+        else:
+            msg_tokens = count_tokens(str(msg_content))
+            if total_tokens + msg_tokens > max_tokens:
+                # Trim the content
+                trimmed_text = trim_content_to_token_limit(str(msg_content), max_tokens - total_tokens)
+                if trimmed_text:
+                    prepared_messages.insert(0, {"role": msg["role"], "content": trimmed_text})
+                break
+            else:
+                prepared_messages.insert(0, msg)
+                total_tokens += msg_tokens
+                
+    return prepared_messages
+
+async def process_pdf_batch(model: str, user_prompt: str, batch_content: str, current_batch: int, total_batches: int, channel, max_retries=3) -> bool:
+    """Process a single batch of PDF content with auto-adjustment for token limits."""
+    batch_size = len(batch_content.split('\n'))
+    original_content = batch_content
+    
+    for attempt in range(max_retries):
+        try:
+            # Create message without history
+            trimmed_content = trim_content_to_token_limit(batch_content, 7000)  # Leave room for prompt
+            messages = [
+                {"role": "user", "content": f"{user_prompt}\n\nAnalyze the following content:\n{trimmed_content}"}
+            ]
+            
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=1,
+                max_tokens=8096
+            )
+            
+            reply = response.choices[0].message.content
+            batch_response = f"Batch {current_batch}/{total_batches} (Pages in batch: {batch_size}):\n{reply}"
+            await send_response(channel, batch_response)
+            return True
+            
+        except Exception as e:
+            error_str = str(e)
+            if "413" in error_str and attempt < max_retries - 1:
+                # Split the batch content in half and try again
+                content_parts = batch_content.split('\n')
+                mid = len(content_parts) // 2
+                batch_content = '\n'.join(content_parts[:mid])
+                batch_size = len(batch_content.split('\n'))
+                await channel.send(f"Batch {current_batch} was too large, reducing size and retrying...")
+                continue
+            elif attempt == max_retries - 1:
+                await channel.send(f"Error processing batch {current_batch}: {str(e)}")
+                return False
+            
+    return False
+
+async def process_pdf(message: discord.Message, pdf_content: bytes, user_prompt: str, model: str) -> None:
+    """Process a PDF file with improved error handling and token management."""
+    try:
+        pdf_file = io.BytesIO(pdf_content)
+        pdf_reader = PdfReader(pdf_file)
+        pages_content = []
+        
+        # Extract text from PDF
+        for page_num, page in enumerate(pdf_reader.pages, 1):
+            text = page.extract_text()
+            if text.strip():  # Only add non-empty pages
+                pages_content.append({
+                    "page": page_num,
+                    "content": text.strip()
+                })
+                
+        if not pages_content:
+            await message.channel.send("Error: Could not extract any text from the PDF.")
+            return
+
+        # Initial batch size
+        total_pages = len(pages_content)
+        current_batch_size = PDF_BATCH_SIZE
+        processed_pages = 0
+        
+        while current_batch_size > 0 and processed_pages < total_pages:
+            try:
+                remaining_pages = total_pages - processed_pages
+                total_batches = (remaining_pages + current_batch_size - 1) // current_batch_size
+                await message.channel.send(f"Processing PDF with {remaining_pages} remaining pages in {total_batches} batches...")
+                
+                batch_start = processed_pages
+                success = True
+                
+                for i in range(batch_start, total_pages, current_batch_size):
+                    batch = pages_content[i:i+current_batch_size]
+                    batch_content = ""
+                    for page_data in batch:
+                        page_num = page_data["page"]
+                        content = page_data["content"]
+                        batch_content += f"\nPDF Page {page_num}:\n{content}\n"
+                    
+                    current_batch = (i - batch_start) // current_batch_size + 1
+                    success = await process_pdf_batch(
+                        model=model,
+                        user_prompt=user_prompt,
+                        batch_content=batch_content,
+                        current_batch=current_batch,
+                        total_batches=total_batches,
+                        channel=message.channel
+                    )
+                    
+                    if not success:
+                        # If batch processing failed, reduce batch size and retry from current position
+                        current_batch_size = current_batch_size // 2
+                        if current_batch_size > 0:
+                            await message.channel.send(f"Reducing batch size to {current_batch_size} pages and retrying from current position...")
+                            break
+                        else:
+                            await message.channel.send("Error: Could not process PDF even with minimum batch size.")
+                            return
+                    else:
+                        processed_pages += len(batch)
+                        await asyncio.sleep(2)  # Delay between successful batches
+                
+                if success and processed_pages >= total_pages:
+                    await message.channel.send("PDF processing completed successfully!")
+                    return
+                    
+            except Exception as e:
+                current_batch_size = current_batch_size // 2
+                if current_batch_size > 0:
+                    await message.channel.send(f"Error occurred. Reducing batch size to {current_batch_size} pages and retrying...")
+                else:
+                    await message.channel.send(f"Error processing PDF: {str(e)}")
+                    return
+                    
+    except Exception as e:
+        await message.channel.send(f"Error processing PDF: {str(e)}")
+        return
 
 # Function to get the remaining turns for each model
 def trim_history(history):
@@ -694,6 +938,10 @@ async def send_response(channel: discord.TextChannel, reply: str):
 @tree.command(name='generate', description='Generates an image from a text prompt.')
 @app_commands.describe(prompt='The prompt for image generation')
 async def generate_image(interaction: discord.Interaction, prompt: str):
+    # Check if user is blacklisted (skip for admins)
+    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
+        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+        return
     await interaction.response.defer(thinking=True)  # Indicate that the bot is processing
     await _generate_image_command(interaction, prompt)
 async def _generate_image_command(interaction: discord.Interaction, prompt: str):
@@ -733,6 +981,77 @@ async def _generate_image_command(interaction: discord.Interaction, prompt: str)
         error_message = f"An error occurred: {str(e)}"
         logging.error(f"Error in _generate_image_command: {error_message}")
         await interaction.followup.send(error_message)
+
+# Slash command to add user to PDF whitelist
+@tree.command(name="whitelist_add", description="Add a user to the PDF processing whitelist")
+@app_commands.describe(user_id="The Discord user ID to whitelist")
+async def whitelist_add(interaction: discord.Interaction, user_id: str):
+    """Adds a user to the PDF processing whitelist."""
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("You don't have permission to use this command. Only admin can use whitelist commands.", ephemeral=True)
+        return
+    
+    try:
+        user_id = int(user_id)
+        if await is_admin(user_id):
+            await interaction.response.send_message("Admins are automatically whitelisted and don't need to be added.", ephemeral=True)
+            return
+        await add_user_to_whitelist(user_id)
+        await interaction.response.send_message(f"User {user_id} has been added to the PDF processing whitelist.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid user ID. Please provide a valid Discord user ID.", ephemeral=True)
+
+@tree.command(name="whitelist_remove", description="Remove a user from the PDF processing whitelist")
+@app_commands.describe(user_id="The Discord user ID to remove from whitelist")
+async def whitelist_remove(interaction: discord.Interaction, user_id: str):
+    """Removes a user from the PDF processing whitelist."""
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("You don't have permission to use this command. Only admin can use whitelist commands.", ephemeral=True)
+        return
+    
+    try:
+        user_id = int(user_id)
+        if await remove_user_from_whitelist(user_id):
+            await interaction.response.send_message(f"User {user_id} has been removed from the PDF processing whitelist.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"User {user_id} was not found in the whitelist.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid user ID. Please provide a valid Discord user ID.", ephemeral=True)
+
+@tree.command(name="blacklist_add", description="Add a user to the bot blacklist")
+@app_commands.describe(user_id="The Discord user ID to blacklist")
+async def blacklist_add(interaction: discord.Interaction, user_id: str):
+    """Adds a user to the bot blacklist."""
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("You don't have permission to use this command. Only admin can use blacklist commands.", ephemeral=True)
+        return
+    
+    try:
+        user_id = int(user_id)
+        if await is_admin(user_id):
+            await interaction.response.send_message("Cannot blacklist an admin.", ephemeral=True)
+            return
+        await add_user_to_blacklist(user_id)
+        await interaction.response.send_message(f"User {user_id} has been added to the bot blacklist. They can no longer use any bot features.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid user ID. Please provide a valid Discord user ID.", ephemeral=True)
+
+@tree.command(name="blacklist_remove", description="Remove a user from the bot blacklist")
+@app_commands.describe(user_id="The Discord user ID to remove from blacklist")
+async def blacklist_remove(interaction: discord.Interaction, user_id: str):
+    """Removes a user from the bot blacklist."""
+    if interaction.user.id != ADMIN_ID:
+        await interaction.response.send_message("You don't have permission to use this command. Only admin can use blacklist commands.", ephemeral=True)
+        return
+    
+    try:
+        user_id = int(user_id)
+        if await remove_user_from_blacklist(user_id):
+            await interaction.response.send_message(f"User {user_id} has been removed from the bot blacklist. They can now use bot features again.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"User {user_id} was not found in the blacklist.", ephemeral=True)
+    except ValueError:
+        await interaction.response.send_message("Invalid user ID. Please provide a valid Discord user ID.", ephemeral=True)
 
 # Task to change status every minute
 @tasks.loop(minutes=5)
