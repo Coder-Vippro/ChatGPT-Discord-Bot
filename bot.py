@@ -131,6 +131,18 @@ PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]
 WEB_SCRAPING_PROMPT = "You are using the Web Scraping Plugin, gathering information from given url. Respond accurately and combine data to provide a clear, insightful summary. "
 NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You can chat, generate images, and perform searches. Craft responses that are easy to copy directly into Discord chats, without using markdown, code blocks, or extra formatting. When you solving any problems you must remember that: Let's solve this step-by-step. What information do we need to find? What operation might help us solve this? Explain your reasoning and provide the answer."
 SEARCH_PROMPT = "You are using the Google Search Plugin, accessing information from the top 3 Google results link which is the scraped content from these 3 website. Summarize these findings clearly, adding relevant insights to answer the users question."
+PDF_ANALYSIS_PROMPT = """You are a PDF Analysis Assistant. Your task is to analyze PDF content thoroughly and effectively. Follow these guidelines:
+
+1. Structure your response clearly and logically
+2. Highlight key information, important facts, and main ideas
+3. Maintain context between different sections of the document
+4. Provide insights and connections between different parts
+5. If there are any numerical data, tables, or statistics, analyze them specifically
+6. If you encounter any technical terms or specialized vocabulary, explain them
+7. Focus on accuracy and relevance in your analysis
+8. When appropriate, summarize complex ideas in simpler terms
+
+Remember to address the user's specific prompt while providing a comprehensive analysis of the content."""
 
 # Google API details
 GOOGLE_API_KEY = str(os.getenv("GOOGLE_API_KEY"))  # Google API Key
@@ -747,7 +759,7 @@ def trim_content_to_token_limit(content: str, max_tokens: int = 7500) -> str:
         
     return '\n'.join(lines)
 
-def prepare_messages_for_api(messages, max_tokens=7500):
+def prepare_messages_for_api(messages, max_tokens=8096):
     """Prepare messages for API while ensuring token limit."""
     total_tokens = 0
     prepared_messages = []
@@ -797,9 +809,10 @@ async def process_pdf_batch(model: str, user_prompt: str, batch_content: str, cu
     
     for attempt in range(max_retries):
         try:
-            # Create message without history
+            # Create message without history but with system prompt
             trimmed_content = trim_content_to_token_limit(batch_content, 7000)  # Leave room for prompt
             messages = [
+                {"role": "system", "content": PDF_ANALYSIS_PROMPT},
                 {"role": "user", "content": f"{user_prompt}\n\nAnalyze the following content:\n{trimmed_content}"}
             ]
             
