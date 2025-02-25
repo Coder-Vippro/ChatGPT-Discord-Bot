@@ -5,9 +5,12 @@ FROM python:3.11.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install curl and other dependencies
+# Install curl, g++ compiler, and other dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    g++ \
+    build-essential \
+    make \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
