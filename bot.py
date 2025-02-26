@@ -615,13 +615,21 @@ async def process_queue(interaction):
         await command_func(interaction, *args)
         await asyncio.sleep(1)  # Optional delay between processing
 
+def check_blacklist():
+    """Decorator to check if a user is blacklisted before executing a command."""
+    async def predicate(interaction: discord.Interaction):
+        if await is_admin(interaction.user.id):
+            return True
+        if await is_user_blacklisted(interaction.user.id):
+            await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
+            return False
+        return True
+    return app_commands.check(predicate)
+
 # Slash command to let users choose a model and save it to the database
 @tree.command(name="choose_model", description="Select the AI model to use for responses.")
+@check_blacklist()
 async def choose_model(interaction: discord.Interaction):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     options = [discord.SelectOption(label=model, value=model) for model in MODEL_OPTIONS]
     select_menu = discord.ui.Select(placeholder="Choose a model", options=options)
 
@@ -643,11 +651,8 @@ async def choose_model(interaction: discord.Interaction):
 # Slash command for search (/search)
 @tree.command(name="search", description="Search on Google and send results to AI model.")
 @app_commands.describe(query="The search query")
+@check_blacklist()
 async def search(interaction: discord.Interaction, query: str):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     """Searches Google and sends results to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
@@ -707,11 +712,8 @@ async def search(interaction: discord.Interaction, query: str):
 # Slash command for web scraping (/web)
 @tree.command(name="web", description="Scrape a webpage and send data to AI model.")
 @app_commands.describe(url="The webpage URL to scrape")
+@check_blacklist()
 async def web(interaction: discord.Interaction, url: str):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     """Scrapes a webpage and sends data to the AI model."""
     await interaction.response.defer(thinking=True)
     user_id = interaction.user.id
@@ -744,11 +746,8 @@ async def web(interaction: discord.Interaction, url: str):
 
 # Reset user chat history from database
 @tree.command(name="reset", description="Reset the bot by clearing user data.")
+@check_blacklist()
 async def reset(interaction: discord.Interaction):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     """Resets the bot by clearing user data."""
     user_id = interaction.user.id
     db.user_histories.delete_one({'user_id': user_id})
@@ -756,11 +755,8 @@ async def reset(interaction: discord.Interaction):
 
 # Slash command for user statistics (/user_stat)
 @tree.command(name="user_stat", description="Get your current input token, output token, and model.")
+@check_blacklist()
 async def user_stat(interaction: discord.Interaction):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     """Fetches and displays the current input token, output token, and model for the user."""
     user_id = interaction.user.id
     history = await get_history(user_id)
@@ -818,6 +814,7 @@ async def user_stat(interaction: discord.Interaction):
 
 # Slash command for help (/help)
 @tree.command(name="help", description="Display a list of available commands.")
+@check_blacklist()
 async def help_command(interaction: discord.Interaction):
     """Sends a list of available commands to the user."""
     help_message = (
@@ -887,11 +884,8 @@ async def process_user_message(message: discord.Message):
     try:
         user_id = message.author.id
         
-        # Admins bypass all restrictions
-        is_admin_user = await is_admin(user_id)
-        
         # Check if user is blacklisted (skip for admins)
-        if not is_admin_user and await is_user_blacklisted(user_id):
+        if not await is_admin(user_id) and await is_user_blacklisted(user_id):
             await message.channel.send("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.")
             return
         
@@ -904,12 +898,12 @@ async def process_user_message(message: discord.Message):
             for attachment in message.attachments:
                 if attachment.filename.lower().endswith('.pdf'):
                     # Check if user is whitelisted (skip for admins)
-                    if not is_admin_user and not await is_user_whitelisted(user_id):
+                    if not await is_admin(user_id) and not await is_user_whitelisted(user_id):
                         await message.channel.send(f"You are not authorized to use PDF processing. Please contact admin (ID: {str(ADMIN_ID)}) to get whitelisted using the /whitelist_add command.")
                         return
                         
                     # Admins can use any model for PDF processing
-                    if not is_admin_user and model not in PDF_ALLOWED_MODELS:
+                    if not await is_admin(user_id) and model not in PDF_ALLOWED_MODELS:
                         await message.channel.send(f"Error: PDF processing is only available with models: {', '.join(PDF_ALLOWED_MODELS)}. Please use /choose_model to switch to one of these models. Your current model: {model}")
                         return
                         
@@ -1323,11 +1317,8 @@ async def send_response(channel: discord.TextChannel, reply: str):
 # Slash command for image generation (/generate)
 @tree.command(name='generate', description='Generates an image from a text prompt.')
 @app_commands.describe(prompt='The prompt for image generation')
+@check_blacklist()
 async def generate_image(interaction: discord.Interaction, prompt: str):
-    # Check if user is blacklisted (skip for admins)
-    if not await is_admin(interaction.user.id) and await is_user_blacklisted(interaction.user.id):
-        await interaction.response.send_message("You have been blacklisted from using this bot. Please contact the admin if you think this is a mistake.", ephemeral=True)
-        return
     await interaction.response.defer(thinking=True)  # Indicate that the bot is processing
     await _generate_image_command(interaction, prompt)
 async def _generate_image_command(interaction: discord.Interaction, prompt: str):
@@ -1441,6 +1432,7 @@ async def blacklist_remove(interaction: discord.Interaction, user_id: str):
 
 @tree.command(name="stop", description="Stop any process or queue of the user. Admins can stop other users' tasks by providing their ID.")
 @app_commands.describe(user_id="The Discord user ID to stop tasks for (admin only)")
+@check_blacklist()
 async def stop(interaction: discord.Interaction, user_id: str = None):
     """Stops any process or queue of the user. Admins can stop other users' tasks by providing their ID."""
     # Defer the interaction first
