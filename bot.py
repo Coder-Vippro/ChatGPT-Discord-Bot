@@ -367,7 +367,8 @@ def scrape_web_content(url: str) -> str:
         }
         
         # Use a timeout to avoid hanging on slow servers
-        page = requests.get(url, headers=headers, timeout=8)
+        # Added verify=False to skip SSL certificate verification
+        page = requests.get(url, headers=headers, timeout=8, verify=False)
         
         # Check HTTP status code
         if page.status_code != 200:
@@ -434,7 +435,7 @@ def scrape_web_content(url: str) -> str:
             # Sort by content length and take the top 10
             if div_texts:
                 text_parts = []
-                for d, _ in div_texts[:10]:
+                for d, _ in sorted(div_texts, key=lambda x: x[1], reverse=True)[:10]:
                     text_parts.append(d.get_text(separator=' ', strip=True))
                 return " ".join(text_parts)
         
