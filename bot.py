@@ -1,7 +1,6 @@
 import os
 import discord
 import io
-import threading
 import tiktoken
 import asyncio
 import requests
@@ -9,8 +8,6 @@ import logging
 import sys
 import json
 import aiohttp
-import tempfile
-import subprocess
 import re
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -22,38 +19,12 @@ from collections import defaultdict
 from dotenv import load_dotenv
 from flask import Flask, jsonify
 from PyPDF2 import PdfReader
-import io
 
 # Load environment variables
 load_dotenv()
 
 # Supported file types for text processing
 supported_file_types = ['.txt', '.py', '.js', '.html', '.css', '.json', '.md', '.log', '.csv', '.xml', '.yml', '.yaml', '.ini', '.cfg', '.conf']
-
-# Flask app for health-check
-app = Flask(__name__)
-
-# Health-check endpoint
-@app.route('/health', methods=['GET'])
-def health():
-    """
-    Checks if the bot is ready and connected to Discord.
-    """
-    if bot.is_closed():  # Bot is disconnected
-        return jsonify(status="unhealthy", error="Bot is disconnected"), 500
-    elif not bot.is_ready():  # Bot is not ready yet
-        return jsonify(status="unhealthy", error="Bot is not ready"), 500
-    elif bot.latency > 151:  # Bot heartbeat is blocked for more than 151 seconds
-        return jsonify(status="unhealthy", error=f"Heartbeat to websocket blocked for {bot.latency:.2f} seconds"), 500
-    else:
-        return jsonify(status="healthy"), 200
-
-# Run Flask server in a separate thread
-def run_flask():
-    """
-    Starts the Flask server.
-    """
-    app.run(host="0.0.0.0", port=5000)
 
 # OpenAI client initialization
 client = OpenAI(
@@ -2057,11 +2028,6 @@ def extract_code_blocks(content):
                     matches.append(('python', code))
     
     return matches
-
-# Start Flask in a separate thread
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.daemon = True  # Ensure it closes when the main program exits
-flask_thread.start()
 
 # Main bot startup
 if __name__ == "__main__":

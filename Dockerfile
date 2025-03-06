@@ -24,13 +24,6 @@ COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Expose port (optional, only if needed for a web server)
-EXPOSE 5000
-
-# Add health check (update endpoint if needed)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD curl --fail http://localhost:5000/health || exit 1
-
 # Copy the rest of the application source code
 COPY . .
 

@@ -7,7 +7,6 @@ runware
 Pillow              
 discord.py
 pymongo
-flask
 tiktoken
 motor
 PyPDF2
