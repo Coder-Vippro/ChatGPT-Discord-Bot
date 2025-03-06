@@ -6,11 +6,3 @@ services:
     env_file:
       - .env
     restart: always
-    ports:
-      - "5000:5000"  # Expose the health-check endpoint
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:5000/health"]
-      interval: 30s      # How often to check (every 30 seconds)
-      timeout: 10s       # Timeout for each health check
-      retries: 3         # Mark as unhealthy after 3 consecutive failures
-      start_period: 10s  # Grace period before health checks start
