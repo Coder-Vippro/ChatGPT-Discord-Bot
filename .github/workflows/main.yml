@@ -72,35 +72,3 @@ jobs:
           cache-to: type=gha,mode=max
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  deploy:
-    runs-on: arm64pi
-    environment: Private Server Deploy
-    needs: build-and-push
-    steps:
-      - name: Remove old running container
-        run: |
-          docker rm -f chatgpt-discord-bot || true
-
-      - name: Remove old image
-        run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
-          IMAGE_TAG=latest
-          docker rmi $IMAGE_NAME:$IMAGE_TAG || true
-
-      - name: Pull and Run Docker container from GHCR
-        run: |
-          IMAGE_NAME=ghcr.io/coder-vippro/chatgpt-discord-bot
-          IMAGE_TAG=latest
-
-          docker pull $IMAGE_NAME:$IMAGE_TAG
-
-          docker run -d --name chatgpt-discord-bot \
-            -e DISCORD_TOKEN="${{ secrets.DISCORD_TOKEN }}" \
-            -e OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
-            -e RUNWARE_API_KEY="${{ secrets.RUNWARE_API_KEY }}" \
-            -e GOOGLE_API_KEY="${{ secrets.GOOGLE_API_KEY }}" \
-            -e GOOGLE_CX="${{ secrets.GOOGLE_CX }}" \
-            -e OPENAI_BASE_URL="${{ secrets.OPENAI_BASE_URL }}" \
-            -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
-            -e ADMIN_ID="${{ secrets.ADMIN_ID }}" \
-            $IMAGE_NAME:$IMAGE_TAG
