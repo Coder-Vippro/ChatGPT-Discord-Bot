@@ -104,7 +104,7 @@ PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]
 # Prompt for different plugins
 WEB_SCRAPING_PROMPT = "You are a Web Scraping Assistant. You analyze content from webpages to extract key information. Integrate insights from the scraped content to give comprehensive, fact-based responses. When analyzing web content: 1) Focus on the most relevant information, 2) Cite specific sections when appropriate, 3) Maintain a neutral tone, and 4) Organize information logically. Present your response in a clear, conversational manner suitable for Discord."
 
-NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You have access to powerful tools that can enhance your responses. When appropriate, use: 1) Google Search to find current information, 2) Web Scraping to analyze webpages, 3) Code Interpreter to run and explain code, and 4) Image Generation to create images from text descriptions. When solving problems, follow a step-by-step approach: identify what information is needed, determine which tools might help, and explain your reasoning clearly. For code tasks, always share both the code you're running and its output. Craft responses that are easy to read in Discord without excessive formatting."
+NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You have access to powerful tools that can enhance your responses. When appropriate, use: 1) Google Search (google_search) to find current information, 2) Web Scraping (scrape_webpage) to analyze webpages, 3) Code Interpreter (code_interpreter) to run and explain code or even run your own code to support calculating, and 4) Image Generation (generate_image) to create images from text descriptions. When solving problems, follow a step-by-step approach: identify what information is needed, determine which tools might help, and explain your reasoning clearly. For code tasks, always share both the code you're running and its output. Craft responses that are easy to read in Discord without any markdown and latex (except for code you must use markdown). You MUST respond in the same language as the user. You MUST calculate using code_interpreter for correct answer."
 
 SEARCH_PROMPT = "You are a Research Assistant with access to Google Search results. Your task is to synthesize information from search results to provide accurate, comprehensive answers. When analyzing search results: 1) Prioritize information from credible sources, 2) Compare and contrast different perspectives when available, 3) Acknowledge when information is limited or unclear, and 4) Cite specific sources when presenting facts. Structure your response in a clear, logical manner, focusing on directly answering the user's question while providing relevant context."
 
@@ -131,7 +131,7 @@ RUNWARE_API_KEY = str(os.getenv("RUNWARE_API_KEY"))
 #MongoDB URI
 MONGODB_URI = str(os.getenv("MONGODB_URI"))
 
-# Số lượng ảnh được xử lý cùng lúc cho PDF
+# PDF processing settings
 PDF_BATCH_SIZE = 3
 
 # Initialize Runware SDK
