@@ -1,26 +1,28 @@
-# Stage 1: Build environment (có compiler và dependencies)
+# Stage 1: Build environment 
 FROM python:3.12.3-alpine as builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install necessary build dependencies
+# Cài đặt các dependencies cần thiết
 RUN apk add --no-cache \
     g++ \
     build-base \
-    make
+    make \
+    rust \
+    cargo 
 
 # Set working directory
 WORKDIR /usr/src/discordbot
 
-# Copy requirements and install dependencies in a virtual environment
+# Copy requirements và cài đặt dependencies trong virtual environment
 COPY requirements.txt .
 RUN python -m venv /venv && \
     /venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Final lightweight image
-FROM python:3.11.10-alpine
+FROM python:3.12.3-alpine
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
