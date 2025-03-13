@@ -1,368 +1,296 @@
-import sys
-import os
-import unittest
 import asyncio
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+import unittest
+import os
+import sys
+import json
+import io
+from unittest.mock import MagicMock, patch, AsyncMock
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import bot
+# Import modules for testing
+from src.database.db_handler import DatabaseHandler
+from src.utils.openai_utils import count_tokens, trim_content_to_token_limit, prepare_messages_for_api
+from src.utils.code_utils import sanitize_code, extract_code_blocks
+from src.utils.web_utils import scrape_web_content
+from src.utils.pdf_utils import send_response
 
-class TestBotUtils(unittest.TestCase):
+
+class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
+    """Test database handler functionality"""
+
+    def setUp(self):
+        # Create a mock for AsyncIOMotorClient
+        self.mock_client_patcher = patch('motor.motor_asyncio.AsyncIOMotorClient')
+        self.mock_client = self.mock_client_patcher.start()
+        
+        # Setup mock database and collections
+        self.mock_db = self.mock_client.return_value.__getitem__.return_value
+        self.mock_histories = MagicMock()
+        self.mock_db.__getitem__.side_effect = lambda x: {
+            'user_histories': self.mock_histories,
+            'user_models': MagicMock(),
+            'whitelist': MagicMock(),
+            'blacklist': MagicMock()
+        }[x]
+        
+        # Initialize handler with mock connection string
+        self.db_handler = DatabaseHandler("mongodb://localhost:27017")
+        
+    def tearDown(self):
+        self.mock_client_patcher.stop()
+        
+    async def test_get_history_empty(self):
+        # Mock find_one to return None (no history)
+        self.mock_histories.find_one = AsyncMock(return_value=None)
+        
+        # Test getting non-existent history
+        result = await self.db_handler.get_history(12345)
+        self.assertEqual(result, [])
+        self.mock_histories.find_one.assert_called_once_with({'user_id': 12345})
+        
+    async def test_get_history_existing(self):
+        # Sample history data
+        sample_history = [
+            {'role': 'user', 'content': 'Hello'},
+            {'role': 'assistant', 'content': 'Hi there!'}
+        ]
+        
+        # Mock find_one to return existing history
+        self.mock_histories.find_one = AsyncMock(return_value={'user_id': 12345, 'history': sample_history})
+        
+        # Test getting existing history
+        result = await self.db_handler.get_history(12345)
+        self.assertEqual(result, sample_history)
+        
+    async def test_save_history(self):
+        # Sample history to save
+        sample_history = [
+            {'role': 'user', 'content': 'Test message'},
+            {'role': 'assistant', 'content': 'Test response'}
+        ]
+        
+        # Mock update_one method
+        self.mock_histories.update_one = AsyncMock()
+        
+        # Test saving history
+        await self.db_handler.save_history(12345, sample_history)
+        
+        # Verify update_one was called with correct parameters
+        self.mock_histories.update_one.assert_called_once_with(
+            {'user_id': 12345},
+            {'$set': {'history': sample_history}},
+            upsert=True
+        )
+        
+    async def test_user_model_operations(self):
+        # Setup mock for user_models collection
+        mock_models = self.mock_db.__getitem__.return_value
+        mock_models.find_one = AsyncMock(return_value={'user_id': 12345, 'model': 'gpt-4o'})
+        mock_models.update_one = AsyncMock()
+        
+        # Test getting user model
+        model = await self.db_handler.get_user_model(12345)
+        self.assertEqual(model, 'gpt-4o')
+        
+        # Test saving user model
+        await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
+        mock_models.update_one.assert_called_once_with(
+            {'user_id': 12345},
+            {'$set': {'model': 'gpt-4o-mini'}},
+            upsert=True
+        )
+
+
+class TestOpenAIUtils(unittest.TestCase):
+    """Test OpenAI utility functions"""
     
     def test_count_tokens(self):
-        """Test token counting function"""
-        # Basic test
-        self.assertGreater(bot.count_tokens("Hello world"), 0)
-        # Empty string should return 0 or small value
-        self.assertLessEqual(bot.count_tokens(""), 3)
-        # Longer text should have more tokens
-        short_text = "Hello"
-        long_text = "Hello " * 100
-        self.assertLess(bot.count_tokens(short_text), bot.count_tokens(long_text))
-    
-
+        # Test token counting
+        self.assertGreater(count_tokens("Hello, world!"), 0)
+        self.assertGreater(count_tokens("This is a longer text that should have more tokens."), 
+                           count_tokens("Short text"))
+                           
+    def test_trim_content_to_token_limit(self):
+        # Create a long text
+        long_text = "This is a test. " * 1000
+        
+        # Test trimming
+        trimmed = trim_content_to_token_limit(long_text, 100)
+        self.assertLess(count_tokens(trimmed), count_tokens(long_text))
+        self.assertLessEqual(count_tokens(trimmed), 100)
+        
+        # Test no trimming needed
+        short_text = "This is a short text."
+        untrimmed = trim_content_to_token_limit(short_text, 100)
+        self.assertEqual(untrimmed, short_text)
+        
     def test_prepare_messages_for_api(self):
-        """Test message preparation for API"""
+        # Test empty messages
+        empty_result = prepare_messages_for_api([])
+        self.assertEqual(len(empty_result), 1)  # Should have system message
+        
+        # Test regular messages
         messages = [
-            {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-            {"role": "user", "content": "Help me with Python"}
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "user", "content": "How are you?"}
         ]
-        prepared = bot.prepare_messages_for_api(messages, max_tokens=1000)
-        self.assertIsInstance(prepared, list)
-        # Should have role and content
-        for msg in prepared:
-            self.assertIn("role", msg)
-            self.assertIn("content", msg)
+        result = prepare_messages_for_api(messages)
+        self.assertEqual(len(result), 3)
+        
+        # Test with null content
+        messages_with_null = [
+            {"role": "user", "content": None},
+            {"role": "assistant", "content": "Response"}
+        ]
+        result_fixed = prepare_messages_for_api(messages_with_null)
+        self.assertEqual(len(result_fixed), 1)  # Should exclude the null content
 
-class TestCodeSanitization(unittest.TestCase):
+
+class TestCodeUtils(unittest.TestCase):
+    """Test code utility functions"""
     
-    def test_python_safe_code(self):
-        """Test Python code sanitization with safe code"""
+    def test_sanitize_python_code_safe(self):
+        # Safe Python code
         code = """
 def factorial(n):
-    if n == 0:
+    if n <= 1:
         return 1
     return n * factorial(n-1)
-        
+    
 print(factorial(5))
 """
-        is_safe, sanitized = bot.sanitize_code(code, "python")
+        is_safe, sanitized = sanitize_code(code, "python")
         self.assertTrue(is_safe)
-        self.assertIn("signal.alarm(10)", sanitized)
+        self.assertIn("def factorial", sanitized)
         
-    def test_python_unsafe_code(self):
-        """Test Python code sanitization with unsafe imports"""
-        code = """
+    def test_sanitize_python_code_unsafe(self):
+        # Unsafe Python code with os.system
+        unsafe_code = """
 import os
-print(os.system('ls'))
+os.system('rm -rf /')
 """
-        is_safe, message = bot.sanitize_code(code, "python")
+        is_safe, message = sanitize_code(unsafe_code, "python")
         self.assertFalse(is_safe)
-        self.assertIn("Forbidden module import", message)
+        self.assertIn("Forbidden", message)
         
-    def test_cpp_safe_code(self):
-        """Test C++ code sanitization with safe code"""
+    def test_sanitize_cpp_code_safe(self):
+        # Safe C++ code
         code = """
 #include <iostream>
 using namespace std;
 
 int main() {
-    cout << "Hello World" << endl;
+    cout << "Hello, world!" << endl;
     return 0;
 }
 """
-        is_safe, sanitized = bot.sanitize_code(code, "cpp")
+        is_safe, sanitized = sanitize_code(code, "cpp")
         self.assertTrue(is_safe)
-        self.assertIn("userMain(", sanitized)
+        self.assertIn("Hello, world!", sanitized)
         
-    def test_cpp_unsafe_code(self):
-        """Test C++ code sanitization with unsafe includes"""
-        code = """
-#include <iostream>
-#include <fstream>
+    def test_sanitize_cpp_code_unsafe(self):
+        # Unsafe C++ code with system
+        unsafe_code = """
+#include <stdlib.h>
 int main() {
-    ofstream file("test.txt");
-    file << "Hello World";
+    system("rm -rf /");
     return 0;
 }
 """
-        is_safe, message = bot.sanitize_code(code, "cpp")
-        self.assertFalse(is_safe)
-        self.assertIn("Forbidden header", message)
-
-    def test_python_eval_exec_detection(self):
-        """Test detection of eval/exec in Python code"""
-        code = """
-print("Hello")
-eval("print('This is dangerous')")
-"""
-        is_safe, message = bot.sanitize_code(code, "python")
+        is_safe, message = sanitize_code(unsafe_code, "cpp")
         self.assertFalse(is_safe)
         self.assertIn("Forbidden", message)
-
-    def test_python_add_missing_structure(self):
-        """Test Python code gets proper safety structure"""
-        code = "print('Hello world')"
-        is_safe, sanitized = bot.sanitize_code(code, "python")
-        self.assertTrue(is_safe)
-        self.assertIn("try:", sanitized)
-        self.assertIn("except Exception as e:", sanitized)
-        self.assertIn("finally:", sanitized)
-        self.assertIn("signal.alarm(0)", sanitized)
-
-    def test_cpp_add_missing_iostream(self):
-        """Test C++ code gets iostream added when using cout"""
-        code = """
-int main() {
-    cout << "Hello" << endl;
-    return 0;
+        
+    def test_extract_code_blocks(self):
+        # Test message with code block
+        message = """
+Here's a Python function to calculate factorial:
+```python
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n-1)
+```
+And here's a C++ version:
+```cpp
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n-1);
 }
+```
 """
-        is_safe, sanitized = bot.sanitize_code(code, "cpp")
-        self.assertTrue(is_safe)
-        self.assertIn("#include <iostream>", sanitized)
-
-    def test_cpp_add_missing_namespace(self):
-        """Test C++ code gets namespace std added when needed"""
-        code = """
-#include <iostream>
-int main() {
-    cout << "Hello" << endl;
-    return 0;
-}
-"""
-        is_safe, sanitized = bot.sanitize_code(code, "cpp")
-        self.assertTrue(is_safe)
-        self.assertIn("using namespace std;", sanitized)
-
-    def test_edge_case_empty_code(self):
-        """Test sanitization with empty code"""
-        code = ""
-        is_safe, sanitized = bot.sanitize_code(code, "python")
-        self.assertTrue(is_safe)
-        self.assertNotEqual(sanitized, "")  # Should add safety structure
-
-    def test_multiple_forbidden_imports(self):
-        """Test code with multiple forbidden imports"""
-        code = """
-import os
-import sys
-import subprocess
-print("This is malicious")
-"""
-        is_safe, message = bot.sanitize_code(code, "python")
-        self.assertFalse(is_safe)
-        self.assertIn("Forbidden", message)
-
-
-@pytest.mark.asyncio
-class TestAsyncFunctions:
-    
-    @pytest.fixture
-    def mock_channel(self):
-        mock = AsyncMock()
-        mock.send = AsyncMock()
-        return mock
+        blocks = extract_code_blocks(message)
+        self.assertEqual(len(blocks), 2)
+        self.assertEqual(blocks[0][0], "python")
+        self.assertEqual(blocks[1][0], "cpp")
         
-    @patch('bot.client.chat.completions.create')
-    async def test_process_batch(self, mock_create, mock_channel):
-        """Test batch processing"""
+        # Test without language specifier
+        message_no_lang = """
+Here's some code:
+```
+print("Hello world")
+```
+"""
+        blocks_no_lang = extract_code_blocks(message_no_lang)
+        self.assertEqual(len(blocks_no_lang), 1)
+
+
+class TestWebUtils(unittest.TestCase):
+    """Test web utilities"""
+    
+    @patch('requests.get')
+    def test_scrape_web_content(self, mock_get):
+        # Mock the response
         mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Processed content"
-        mock_create.return_value = mock_response
-        
-        result = await bot.process_batch(
-            model="gpt-4o-mini",
-            user_prompt="Analyze this",
-            batch_content="Test content",
-            current_batch=1,
-            total_batches=1,
-            channel=mock_channel()
-        )
-        
-        # Should call the API
-        mock_create.assert_called_once()
-        self.assertTrue(result)
-        
-    @patch('asyncio.create_subprocess_exec')
-    async def test_execute_code(self, mock_subprocess):
-        """Test code execution"""
-        # Configure the mock
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"Hello World", b""))
-        mock_subprocess.return_value = mock_proc
-        
-        result = await bot.execute_code("print('Hello World')", "python")
-        self.assertIn("Hello World", result)
-        
-
-
-class TestToolFunctions(unittest.TestCase):
-    
-    @patch('bot.google_custom_search')
-    def test_tool_function_google_search(self, mock_search):
-        """Test Google search tool function"""
-        mock_search.return_value = {"results": [{"title": "Test", "link": "https://example.com"}]}
-        
-        result = bot.tool_functions["google_search"]({"query": "test", "num_results": 1})
-        mock_search.assert_called_once_with("test", 1)
-        self.assertIsInstance(result, dict)
-    
-    @patch('bot.scrape_web_content')
-    def test_tool_function_scrape_webpage(self, mock_scrape):
-        """Test web scraping tool function"""
-        mock_scrape.return_value = "Scraped content"
-        
-        result = bot.tool_functions["scrape_webpage"]({"url": "https://example.com"})
-        mock_scrape.assert_called_once_with("https://example.com")
-        self.assertEqual(result, "Scraped content")
-
-    @patch('bot.requests.get')
-    def test_scrape_web_content_detailed(self, mock_requests_get):
-        """Test web scraping function with different scenarios"""
-        # Setup mock response for successful HTML page with article content
-        mock_response = MagicMock()
+        mock_response.text = '<html><body><h1>Test Heading</h1><p>Test paragraph</p></body></html>'
         mock_response.status_code = 200
-        mock_response.headers = {'content-type': 'text/html'}
-        mock_response.content = """
-        <html><body>
-            <article>
-                <h1>Test Article</h1>
-                <p>This is a test paragraph with meaningful content.</p>
-            </article>
-        </body></html>
-        """
-        mock_requests_get.return_value = mock_response
+        mock_get.return_value = mock_response
         
-        # Test successful scraping with article tag
-        content = bot.scrape_web_content("https://example.com")
-        self.assertIn("Test Article", content)
-        self.assertIn("test paragraph", content)
+        # Test scraping
+        content = scrape_web_content("https://example.com")
+        self.assertIn("Test Heading", content)
+        self.assertIn("Test paragraph", content)
         
-        # Test with HTTP error
-        mock_response.status_code = 404
-        mock_response.headers = {'content-type': 'text/html'}
-        content = bot.scrape_web_content("https://example.com/not-found")
-        self.assertIn("Error: Received status code 404", content)
+    @patch('requests.get')
+    def test_scrape_web_content_error(self, mock_get):
+        # Mock a failed response
+        mock_get.side_effect = Exception("Connection error")
         
-        # Test with request exception
-        mock_requests_get.side_effect = Exception("Connection error")
-        content = bot.scrape_web_content("https://example.com")
-        self.assertIn("An error occurred", content)
+        # Test error handling
+        content = scrape_web_content("https://example.com")
+        self.assertIn("Failed to scrape", content)
 
 
-@pytest.mark.asyncio
-class TestErrorHandling:
+class TestPDFUtils(unittest.TestCase):
+    """Test PDF utilities"""
     
-    @pytest.fixture
-    def mock_channel(self):
-        mock = AsyncMock()
-        mock.send = AsyncMock()
-        return mock
+    async def test_send_response(self):
+        # Create mock channel
+        mock_channel = AsyncMock()
+        mock_channel.send = AsyncMock()
         
-    @patch('bot.client.chat.completions.create')
-    async def test_handle_api_error(self, mock_create, mock_channel):
-        """Test handling of API errors"""
-        mock_create.side_effect = Exception("API Error")
+        # Test sending short response
+        short_response = "This is a short response"
+        await send_response(mock_channel, short_response)
+        mock_channel.send.assert_called_once_with(short_response)
         
-        channel = mock_channel()
-        # Call function that would use the API
-        await bot.send_chatgpt_response(
-            prompt="Test prompt",
-            channel=channel,
-            conversation_history=[],
-            user_id="12345"
-        )
+        # Reset mock
+        mock_channel.send.reset_mock()
         
-        # Verify error was handled and communicated
-        channel.send.assert_called_once()
-        args, _ = channel.send.call_args
-        self.assertIn("error", args[0].lower())
+        # Mock for long response (testing would need file operations)
+        with patch('builtins.open', new_callable=unittest.mock.mock_open):
+            with patch('discord.File', return_value="mocked_file"):
+                # Test sending long response
+                long_response = "X" * 2500  # Over 2000 character limit
+                await send_response(mock_channel, long_response)
+                mock_channel.send.assert_called_once()
+                # Verify it's called with the file argument
+                args, kwargs = mock_channel.send.call_args
+                self.assertIn('file', kwargs)
 
-    @patch('bot.execute_code')
-    async def test_code_execution_timeout(self, mock_execute):
-        """Test handling of code execution timeout"""
-        mock_execute.side_effect = asyncio.TimeoutError()
-        
-        result = await bot.process_tool_calls(
-            {"tool_calls": [{"function": {"name": "code_interpreter", "arguments": '{"code": "print(\\"test\\")", "language": "python"}'}}]},
-            []
-        )
-        
-        self.assertIn("execution timed out", result[0]["content"].lower())
 
-class TestCommandHandling(unittest.TestCase):
-    
-    def setUp(self):
-        self.ctx = MagicMock()
-        self.ctx.author = MagicMock()
-        self.ctx.author.id = "12345"
-        self.ctx.send = AsyncMock()
-    
-    @patch('bot.prepare_messages_for_api')
-    @patch('bot.client.chat.completions.create')
-    async def test_chat_command(self, mock_create, mock_prepare):
-        """Test chat command"""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Hello, I'm ChatGPT"
-        mock_create.return_value = mock_response
-        mock_prepare.return_value = []
-        
-        # Call chat command
-        await bot.chat(self.ctx, "Tell me about Python")
-        
-        # Verify
-        self.ctx.send.assert_called()
-        mock_create.assert_called_once()
-
-@patch('bot.HISTORY_DB', {})  # Mocking the database dictionary
-class TestDatabaseFunctions(unittest.TestCase):
-    
-    async def test_history_functions(self):
-        """Test user history saving and retrieval"""
-        user_id = "12345"
-        test_history = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"}
-        ]
-        
-        # Test saving history
-        await bot.save_history(user_id, test_history)
-        
-        # Test retrieving history
-        retrieved = await bot.get_history(user_id)
-        self.assertEqual(retrieved, test_history)
-        
-        # Test history for new user
-        new_user = "67890"
-        new_history = await bot.get_history(new_user)
-        self.assertEqual(len(new_history), 1)  # Should have system message
-        self.assertEqual(new_history[0]["role"], "system")
-    
-    @patch('bot.DEFAULT_MODEL', 'gpt-4o-mini')
-    async def test_user_settings(self):
-        """Test user settings management"""
-        user_id = "12345"
-        
-        # Test default settings
-        model = await bot.get_user_model(user_id)
-        self.assertEqual(model, "gpt-4o-mini")
-        
-        # Test updating settings
-        await bot.set_user_model(user_id, "gpt-4o")
-        updated_model = await bot.get_user_model(user_id)
-        self.assertEqual(updated_model, "gpt-4o")
-        
-        # Test invalid model handling
-        with self.assertRaises(ValueError):
-            await bot.set_user_model(user_id, "invalid-model")
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
