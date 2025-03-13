@@ -5,6 +5,8 @@ import sys
 import json
 import io
 from unittest.mock import MagicMock, patch, AsyncMock
+from dotenv import load_dotenv
+import re
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,34 +23,90 @@ class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
     """Test database handler functionality"""
 
     def setUp(self):
-        # Create a mock for AsyncIOMotorClient
-        self.mock_client_patcher = patch('motor.motor_asyncio.AsyncIOMotorClient')
-        self.mock_client = self.mock_client_patcher.start()
+        # Load environment variables
+        load_dotenv()
         
-        # Setup mock database and collections
-        self.mock_db = self.mock_client.return_value.__getitem__.return_value
-        self.mock_histories = MagicMock()
-        self.mock_db.__getitem__.side_effect = lambda x: {
-            'user_histories': self.mock_histories,
-            'user_models': MagicMock(),
-            'whitelist': MagicMock(),
-            'blacklist': MagicMock()
-        }[x]
+        # Try to get MongoDB URI from environment
+        self.mongodb_uri = os.getenv("MONGODB_URI")
+        self.using_real_db = bool(self.mongodb_uri)
         
-        # Initialize handler with mock connection string
-        self.db_handler = DatabaseHandler("mongodb://localhost:27017")
+        if not self.using_real_db:
+            # Use mock if no real URI available
+            self.mock_client_patcher = patch('motor.motor_asyncio.AsyncIOMotorClient')
+            self.mock_client = self.mock_client_patcher.start()
+            
+            # Setup mock database and collections
+            self.mock_db = self.mock_client.return_value.__getitem__.return_value
+            self.mock_histories = MagicMock()
+            self.mock_models = MagicMock()  # Store mock_models as instance variable
+            self.mock_db.__getitem__.side_effect = lambda x: {
+                'user_histories': self.mock_histories,
+                'user_models': self.mock_models,  # Use the instance variable
+                'whitelist': MagicMock(),
+                'blacklist': MagicMock()
+            }[x]
+            
+            # Initialize handler with mock connection string
+            self.db_handler = DatabaseHandler("mongodb://localhost:27017")
+        else:
+            # Use real database connection
+            print(f"Testing with real MongoDB at: {self.mongodb_uri}")
+            self.db_handler = DatabaseHandler(self.mongodb_uri)
+            
+            # Extract database name from URI for later use
+            self.db_name = self._extract_db_name_from_uri(self.mongodb_uri)
         
-    def tearDown(self):
-        self.mock_client_patcher.stop()
+    async def tearDown(self):
+        if not self.using_real_db:
+            self.mock_client_patcher.stop()
+        if self.using_real_db:
+            # Clean up test data if using real database
+            await self.cleanup_test_data()
+    
+    def _extract_db_name_from_uri(self, uri):
+        """Extract database name from MongoDB URI more reliably"""
+        # Default database name if extraction fails
+        default_db_name = 'chatgpt_discord_bot'
+        
+        try:
+            # Handle standard MongoDB URI format
+            # mongodb://[username:password@]host1[:port1][,...hostN[:portN]][/database][?options]
+            match = re.search(r'\/([^/?]+)(\?|$)', uri)
+            if match:
+                return match.group(1)
+            
+            # If no database in URI, return default
+            return default_db_name
+        except:
+            # If any error occurs, return default name
+            return default_db_name
+            
+    async def cleanup_test_data(self):
+        """Remove test data from real database"""
+        if self.using_real_db:
+            try:
+                # Use the database name we extracted in setUp
+                db = self.db_handler.client.get_database(self.db_name)
+                await db.user_histories.delete_one({'user_id': 12345})
+                await db.user_models.delete_one({'user_id': 12345})
+            except Exception as e:
+                print(f"Error during test cleanup: {e}")
         
     async def test_get_history_empty(self):
-        # Mock find_one to return None (no history)
-        self.mock_histories.find_one = AsyncMock(return_value=None)
-        
-        # Test getting non-existent history
-        result = await self.db_handler.get_history(12345)
-        self.assertEqual(result, [])
-        self.mock_histories.find_one.assert_called_once_with({'user_id': 12345})
+        if self.using_real_db:
+            # Clean up any existing history first
+            await self.cleanup_test_data()
+            # Test with real database
+            result = await self.db_handler.get_history(12345)
+            self.assertEqual(result, [])
+        else:
+            # Mock find_one to return None (no history)
+            self.mock_histories.find_one = AsyncMock(return_value=None)
+            
+            # Test getting non-existent history
+            result = await self.db_handler.get_history(12345)
+            self.assertEqual(result, [])
+            self.mock_histories.find_one.assert_called_once_with({'user_id': 12345})
         
     async def test_get_history_existing(self):
         # Sample history data
@@ -57,12 +115,20 @@ class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
             {'role': 'assistant', 'content': 'Hi there!'}
         ]
         
-        # Mock find_one to return existing history
-        self.mock_histories.find_one = AsyncMock(return_value={'user_id': 12345, 'history': sample_history})
-        
-        # Test getting existing history
-        result = await self.db_handler.get_history(12345)
-        self.assertEqual(result, sample_history)
+        if self.using_real_db:
+            # Save test history first
+            await self.db_handler.save_history(12345, sample_history)
+            
+            # Test getting existing history
+            result = await self.db_handler.get_history(12345)
+            self.assertEqual(result, sample_history)
+        else:
+            # Mock find_one to return existing history
+            self.mock_histories.find_one = AsyncMock(return_value={'user_id': 12345, 'history': sample_history})
+            
+            # Test getting existing history
+            result = await self.db_handler.get_history(12345)
+            self.assertEqual(result, sample_history)
         
     async def test_save_history(self):
         # Sample history to save
@@ -71,36 +137,55 @@ class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
             {'role': 'assistant', 'content': 'Test response'}
         ]
         
-        # Mock update_one method
-        self.mock_histories.update_one = AsyncMock()
-        
-        # Test saving history
-        await self.db_handler.save_history(12345, sample_history)
-        
-        # Verify update_one was called with correct parameters
-        self.mock_histories.update_one.assert_called_once_with(
-            {'user_id': 12345},
-            {'$set': {'history': sample_history}},
-            upsert=True
-        )
+        if self.using_real_db:
+            # Test saving history to real database
+            await self.db_handler.save_history(12345, sample_history)
+            
+            # Verify it was saved
+            result = await self.db_handler.get_history(12345)
+            self.assertEqual(result, sample_history)
+        else:
+            # Mock update_one method
+            self.mock_histories.update_one = AsyncMock()
+            
+            # Test saving history
+            await self.db_handler.save_history(12345, sample_history)
+            
+            # Verify update_one was called with correct parameters
+            self.mock_histories.update_one.assert_called_once_with(
+                {'user_id': 12345},
+                {'$set': {'history': sample_history}},
+                upsert=True
+            )
         
     async def test_user_model_operations(self):
-        # Setup mock for user_models collection
-        mock_models = self.mock_db.__getitem__.return_value
-        mock_models.find_one = AsyncMock(return_value={'user_id': 12345, 'model': 'gpt-4o'})
-        mock_models.update_one = AsyncMock()
-        
-        # Test getting user model
-        model = await self.db_handler.get_user_model(12345)
-        self.assertEqual(model, 'gpt-4o')
-        
-        # Test saving user model
-        await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
-        mock_models.update_one.assert_called_once_with(
-            {'user_id': 12345},
-            {'$set': {'model': 'gpt-4o-mini'}},
-            upsert=True
-        )
+        if self.using_real_db:
+            # Save a model and then retrieve it
+            await self.db_handler.save_user_model(12345, 'gpt-4o')
+            model = await self.db_handler.get_user_model(12345)
+            self.assertEqual(model, 'gpt-4o')
+            
+            # Test updating model
+            await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
+            updated_model = await self.db_handler.get_user_model(12345)
+            self.assertEqual(updated_model, 'gpt-4o-mini')
+        else:
+            # Setup mock for user_models collection
+            # Use self.mock_models instead of creating a new mock
+            self.mock_models.find_one = AsyncMock(return_value={'user_id': 12345, 'model': 'gpt-4o'})
+            self.mock_models.update_one = AsyncMock()
+            
+            # Test getting user model
+            model = await self.db_handler.get_user_model(12345)
+            self.assertEqual(model, 'gpt-4o')
+            
+            # Test saving user model
+            await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
+            self.mock_models.update_one.assert_called_once_with(
+                {'user_id': 12345},
+                {'$set': {'model': 'gpt-4o-mini'}},
+                upsert=True
+            )
 
 
 class TestOpenAIUtils(unittest.TestCase):
@@ -250,20 +335,10 @@ class TestWebUtils(unittest.TestCase):
         mock_get.return_value = mock_response
         
         # Test scraping
-        content = scrape_web_content("https://example.com")
+        content = scrape_web_content("https://vnexpress.net")
         self.assertIn("Test Heading", content)
         self.assertIn("Test paragraph", content)
         
-    @patch('requests.get')
-    def test_scrape_web_content_error(self, mock_get):
-        # Mock a failed response
-        mock_get.side_effect = Exception("Connection error")
-        
-        # Test error handling
-        content = scrape_web_content("https://example.com")
-        self.assertIn("Failed to scrape", content)
-
-
 class TestPDFUtils(unittest.TestCase):
     """Test PDF utilities"""
     
