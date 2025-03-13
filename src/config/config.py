@@ -1,0 +1,110 @@
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Bot statuses
+STATUSES = [
+    "Powered by GPT-4o!",
+    "Generating creative text!",
+    "Creating images on demand!",
+    "Answering your queries with AI!",
+    "Exploring AI capabilities!",
+    "Crafting stories with GPT!",
+    "Generating artwork with AI!",
+    "Transforming ideas into text!",
+    "Your personal AI assistant!",
+    "Making text-based magic happen!",
+    "Bringing your prompts to life!",
+    "Searching the web for you!",
+    "Summarizing information with AI!",
+    "Discussing the latest AI trends!",
+    "Innovating with neural networks!",
+    "Providing image generation services!",
+    "Curating knowledge with AI!",
+    "Explaining concepts in simple terms!",
+    "Generating visuals for your ideas!",
+    "Answering coding questions!",
+    "Enhancing your creativity!",
+    "Crafting engaging dialogues!",
+    "Bringing imagination to reality!",
+    "Your AI-powered content creator!",
+    "Exploring the world of AI art!",
+    "Helping you learn with AI!",
+    "Generating prompts for inspiration!",
+    "Creating stunning visuals!",
+    "Answering trivia questions!",
+    "Your source for AI-generated insights!",
+    "Delving into the world of machine learning!",
+    "Providing data-driven answers!",
+    "Crafting personalized content!",
+    "Exploring creative AI solutions!",
+    "Summarizing articles for you!",
+    "Generating memes with AI!",
+    "Transforming text into images!",
+    "Enhancing your projects with AI!",
+    "Creating unique characters with GPT!",
+    "Exploring AI storytelling!",
+    "Generating logos and designs!",
+    "Helping you brainstorm ideas!",
+    "Creating educational content!",
+    "Your creative writing partner!",
+    "Building narratives with AI!",
+    "Exploring ethical AI use!",
+    "Bringing concepts to life visually!",
+    "Your AI companion for learning!",
+    "Generating infographics!",
+    "Creating art based on your prompts!",
+    "Exploring AI in entertainment!",
+    "Your gateway to AI innovation!",
+]
+
+# List of available models
+MODEL_OPTIONS = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o1-preview",
+    "o1-mini",
+    "o1",
+    "o3-mini"
+]
+
+PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]
+PDF_BATCH_SIZE = 3
+
+# Prompt templates
+WEB_SCRAPING_PROMPT = "You are a Web Scraping Assistant. You analyze content from webpages to extract key information. Integrate insights from the scraped content to give comprehensive, fact-based responses. When analyzing web content: 1) Focus on the most relevant information, 2) Cite specific sections when appropriate, 3) Maintain a neutral tone, and 4) Organize information logically. Present your response in a clear, conversational manner suitable for Discord."
+
+NORMAL_CHAT_PROMPT = "You're ChatGPT for Discord! You have access to powerful tools that can enhance your responses. When appropriate, use: 1) Google Search to find current information, 2) Web Scraping to analyze webpages, 3) Code Interpreter to run and explain code, and 4) Image Generation to create images from text descriptions. When solving problems, follow a step-by-step approach: identify what information is needed, determine which tools might help, and explain your reasoning clearly. For code tasks, always share both the code you're running and its output. Craft responses that are easy to read in Discord without excessive formatting."
+
+SEARCH_PROMPT = "You are a Research Assistant with access to Google Search results. Your task is to synthesize information from search results to provide accurate, comprehensive answers. When analyzing search results: 1) Prioritize information from credible sources, 2) Compare and contrast different perspectives when available, 3) Acknowledge when information is limited or unclear, and 4) Cite specific sources when presenting facts. Structure your response in a clear, logical manner, focusing on directly answering the user's question while providing relevant context."
+
+PDF_ANALYSIS_PROMPT = """You are a PDF Analysis Assistant. Your task is to analyze PDF content thoroughly and effectively. Follow these guidelines:
+
+1. Structure your response clearly and logically
+2. Highlight key information, important facts, and main ideas
+3. Maintain context between different sections of the document
+4. Provide insights and connections between different parts
+5. If there are any numerical data, tables, or statistics, analyze them specifically
+6. If you encounter any technical terms or specialized vocabulary, explain them
+7. Focus on accuracy and relevance in your analysis
+8. When appropriate, summarize complex ideas in simpler terms
+
+Remember to address the user's specific prompt while providing a comprehensive analysis of the content."""
+
+# Environment variables
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CX = os.getenv("GOOGLE_CX")
+RUNWARE_API_KEY = os.getenv("RUNWARE_API_KEY")
+MONGODB_URI = os.getenv("MONGODB_URI")
+ADMIN_ID = os.getenv("ADMIN_ID")  # Add ADMIN_ID if you're using it
+
+# Print debug information if environment variables are not found
+if not DISCORD_TOKEN:
+    print("WARNING: DISCORD_TOKEN not found in .env file")
+if not MONGODB_URI:
+    print("WARNING: MONGODB_URI not found in .env file")
+if not RUNWARE_API_KEY:
+    print("WARNING: RUNWARE_API_KEY not found in .env file")

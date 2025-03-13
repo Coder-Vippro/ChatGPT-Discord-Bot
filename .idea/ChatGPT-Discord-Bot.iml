@@ -6,6 +6,7 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv1" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (ChatGPT-Discord-Bot)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
