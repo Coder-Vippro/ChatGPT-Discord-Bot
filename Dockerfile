@@ -39,8 +39,8 @@ RUN apk add --no-cache libstdc++
 # Set the working directory
 WORKDIR /usr/src/discordbot
 
-# Copy installed Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12.3 /usr/local/lib/python3.12.3
+# Copy installed Python packages from builder - using correct site-packages path
+COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy the application source code
