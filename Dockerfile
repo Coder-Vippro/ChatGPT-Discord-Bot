@@ -1,30 +1,49 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11.10-slim
+# Build stage with all build dependencies
+FROM python:3.12.3-alpine AS builder
 
-# Set environment variables to reduce Python buffer and logs
+# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install curl, g++ compiler, and other dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install build dependencies
+RUN apk add --no-cache \
     curl \
     g++ \
-    build-essential \
+    gcc \
+    musl-dev \
     make \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/*
+    rust \
+    cargo \
+    build-base
 
-# Set the working directory in the container
-WORKDIR /usr/src/discordbot
+# Set the working directory
+WORKDIR /app
 
-# Copy the requirements file first to leverage Docker cache
+# Copy requirements file
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python packages with BuildKit cache
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application source code
+# Runtime stage with minimal dependencies
+FROM python:3.12.3-alpine
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install runtime dependencies
+RUN apk add --no-cache libstdc++
+
+# Set the working directory
+WORKDIR /usr/src/discordbot
+
+# Copy installed Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy the application source code
 COPY . .
 
 # Command to run the application
