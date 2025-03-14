@@ -90,6 +90,7 @@ PDF_ANALYSIS_PROMPT = """You are a PDF Analysis Assistant. Your task is to analy
 6. If you encounter any technical terms or specialized vocabulary, explain them
 7. Focus on accuracy and relevance in your analysis
 8. When appropriate, summarize complex ideas in simpler terms
+9. You MUST respond in the same language as the user
 
 Remember to address the user's specific prompt while providing a comprehensive analysis of the content."""
 

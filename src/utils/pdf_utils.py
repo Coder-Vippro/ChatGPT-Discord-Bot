@@ -151,10 +151,11 @@ async def process_pdf_batch(model: str, client, user_prompt: str, batch_content:
                     {"role": "user", "content": f"{user_prompt}\n\nAnalyze the following content:\n{trimmed_content}"}
                 ]
             
-            response = client.chat.completions.create(
+            # Add await here - this was the issue causing the error
+            response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=1
+                temperature=0.1
             )
             
             reply = response.choices[0].message.content
