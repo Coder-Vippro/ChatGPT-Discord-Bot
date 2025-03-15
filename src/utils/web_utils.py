@@ -103,8 +103,8 @@ def scrape_web_content(url: str) -> str:
         text = '\n'.join(line for line in lines if line)
         
         # Limit the amount of text to avoid overwhelming the model
-        if len(text) > 15000:
-            text = text[:15000] + "...\n[Content truncated due to length]"
+        if len(text) > 7000:
+            text = text[:7000] + "...\n[Content truncated due to length]"
             
         return text
         
