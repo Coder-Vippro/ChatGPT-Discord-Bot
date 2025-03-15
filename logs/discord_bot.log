@@ -47,3 +47,16 @@
 2025-03-15 13:07:44,264 - code_execution - INFO - Platform: Linux-6.11.0-19-generic-x86_64-with-glibc2.39, Python: 3.12.3 (main, Feb  4 2025, 14:48:35) [GCC 13.3.0]
 2025-03-15 13:07:44,264 - code_execution - INFO - Found python3 at: /usr/bin/python3
 2025-03-15 13:07:44,264 - code_execution - INFO - Using Python executable: /usr/bin/python3
+2025-03-15 21:47:53,098 - root - INFO - Configured logging from dictionary configuration
+2025-03-15 21:47:53,098 - root - INFO - Webhook logging enabled at level INFO
+2025-03-15 21:47:53,184 - root - INFO - OpenAI client initialized successfully
+2025-03-15 21:47:54,773 - discord.client - INFO - logging in using static token
+2025-03-15 21:47:54,773 - discord.client - INFO - logging in using static token
+2025-03-15 21:47:56,625 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: ddb8f40d00e749c82be7d8a1c2e723e0).
+2025-03-15 21:47:56,625 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: ddb8f40d00e749c82be7d8a1c2e723e0).
+2025-03-15 21:49:34,635 - code_execution - INFO - Executing cpp code, length: 267, has input: False
+2025-03-15 21:49:34,635 - code_execution - INFO - Platform: Linux-6.11.0-19-generic-x86_64-with-glibc2.39, Python: 3.12.3 (main, Feb  4 2025, 14:48:35) [GCC 13.3.0]
+2025-03-15 21:49:35,343 - code_execution - INFO - Executing python code, length: 100, has input: False
+2025-03-15 21:49:35,344 - code_execution - INFO - Platform: Linux-6.11.0-19-generic-x86_64-with-glibc2.39, Python: 3.12.3 (main, Feb  4 2025, 14:48:35) [GCC 13.3.0]
+2025-03-15 21:49:35,344 - code_execution - INFO - Found python3 at: /usr/bin/python3
+2025-03-15 21:49:35,344 - code_execution - INFO - Using Python executable: /usr/bin/python3
