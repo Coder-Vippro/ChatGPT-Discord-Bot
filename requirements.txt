@@ -1,35 +1,11 @@
-# Core dependencies
-discord.py>=2.3.2
-python-dotenv>=1.0.0
+discord.py>=2.3.0
+openai>=1.3.0
+motor>=3.3.0
+pymongo>=4.6.0
+tiktoken>=0.5.0
+PyPDF2>=3.0.0
+beautifulsoup4>=4.12.0
 requests>=2.31.0
-aiohttp>=3.9.1
-
-# OpenAI and API related
-openai>=1.3.7
-google-api-python-client>=2.108.0
-
-# Web scraping and processing
-beautifulsoup4>=4.12.2
-html2text>=2020.1.16
-
-# Database
-pymongo>=4.6.1
-motor>=3.3.2
-
-# Testing
-pytest>=7.4.3
-pytest-asyncio>=0.23.2
-pytest-cov>=4.1.0
-coverage>=7.3.2
-
-# Code execution and utilities
-concurrent-futures>=3.0.5
-
-# Logging and monitoring
-python-json-logger>=2.0.7
-
-# Type hints
-typing-extensions>=4.8.0
-
-# Async utilities
-asyncio>=3.4.3
+aiohttp>=3.9.0
+runware>=0.2.0
+python-dotenv>=1.0.0
