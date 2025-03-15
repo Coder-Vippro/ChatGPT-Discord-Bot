@@ -34,7 +34,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Install runtime dependencies
-RUN apk add --no-cache libstdc++ gcc c++
+RUN apk add --no-cache libstdc++ 
+RUN apk add --no-cache gcc
+RUN apk add --no-cache C++
 
 # Set the working directory
 WORKDIR /usr/src/discordbot
