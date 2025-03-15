@@ -94,6 +94,62 @@ PDF_ANALYSIS_PROMPT = """You are a PDF Analysis Assistant. Your task is to analy
 
 Remember to address the user's specific prompt while providing a comprehensive analysis of the content."""
 
+# Logging configuration
+LOGGING_CONFIG = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'formatter': 'standard',
+            'class': 'logging.StreamHandler',
+        },
+        'file': {
+            'level': 'INFO',
+            'formatter': 'standard',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/discord_bot.log',
+            'encoding': 'utf-8',
+        },
+    },
+    'loggers': {
+        '': {  # Root logger
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+        },
+        'discord': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+        },
+        'discord.http': {
+            'handlers': ['console', 'file'],
+            'level': 'WARNING',
+        },
+    },
+}
+
+# Webhook logging configuration
+ENABLE_WEBHOOK_LOGGING = os.getenv('ENABLE_WEBHOOK_LOGGING', 'False').lower() == 'true'
+LOGGING_WEBHOOK_URL = os.getenv('LOGGING_WEBHOOK_URL', '')
+WEBHOOK_LOG_LEVEL = os.getenv('WEBHOOK_LOG_LEVEL', 'INFO')
+WEBHOOK_APP_NAME = os.getenv('WEBHOOK_APP_NAME', 'Discord Bot')
+WEBHOOK_BATCH_SIZE = int(os.getenv('WEBHOOK_BATCH_SIZE', '5'))
+WEBHOOK_FLUSH_INTERVAL = int(os.getenv('WEBHOOK_FLUSH_INTERVAL', '10'))
+
+# Map string log levels to logging module levels
+LOG_LEVEL_MAP = {
+    'DEBUG': 10,
+    'INFO': 20,
+    'WARNING': 30,
+    'ERROR': 40,
+    'CRITICAL': 50,
+}
+
 # Environment variables
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -109,3 +165,5 @@ if not MONGODB_URI:
     print("WARNING: MONGODB_URI not found in .env file")
 if not RUNWARE_API_KEY:
     print("WARNING: RUNWARE_API_KEY not found in .env file")
+if ENABLE_WEBHOOK_LOGGING and not LOGGING_WEBHOOK_URL:
+    print("WARNING: Webhook logging enabled but LOGGING_WEBHOOK_URL not found in .env file")
