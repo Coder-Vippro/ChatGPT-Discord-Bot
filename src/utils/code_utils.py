@@ -514,7 +514,7 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
                         ['g++', '--version'],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        timeout=2
+                        timeout=10
                     ))
                     
                     if check_result.returncode != 0:
@@ -525,10 +525,10 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
                     
                     # Compile C++ code with restricted options and optimizations
                     compile_result = await run_in_thread_pool(lambda: subprocess.run(
-                        ['g++', src_path, '-o', exe_path, '-std=c++17', '-O2'],
+                        ['g++', src_path, '-o', exe_path, '-march=native', '-std=c++17', '-O2'],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        timeout=5
+                        timeout=10
                     ))
                     
                     if compile_result.returncode != 0:
