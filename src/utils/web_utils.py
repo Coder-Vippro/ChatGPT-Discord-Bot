@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from typing import Dict, List, Any, Optional
 from src.config.config import GOOGLE_API_KEY, GOOGLE_CX
 
-def google_custom_search(query: str, num_results: int = 5, auto_scrape: bool = True) -> dict:
+def google_custom_search(query: str, num_results: int = 3, auto_scrape: bool = True) -> dict:
     """
     Perform a Google search using the Google Custom Search API.
     
@@ -103,8 +103,8 @@ def scrape_web_content(url: str) -> str:
         text = '\n'.join(line for line in lines if line)
         
         # Limit the amount of text to avoid overwhelming the model
-        if len(text) > 6000:
-            text = text[:6000] + "...\n[Content truncated due to length]"
+        if len(text) > 5000:
+            text = text[:5000] + "...\n[Content truncated due to length]"
             
         return text
         
