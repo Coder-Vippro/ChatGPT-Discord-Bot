@@ -68,7 +68,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest
-          cache-from: type=gha,scope=pip-dependencies  # Chỉ cache dependencies
+          cache-from: type=gha,scope=pip-dependencies
           cache-to: type=gha,mode=min,scope=pip-dependencies
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
