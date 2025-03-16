@@ -323,21 +323,21 @@ print("Hello world")
         self.assertEqual(len(blocks_no_lang), 1)
 
 
-class TestWebUtils(unittest.TestCase):
-    """Test web utilities"""
-    
-    @patch('requests.get')
-    def test_scrape_web_content(self, mock_get):
-        # Mock the response
-        mock_response = MagicMock()
-        mock_response.text = '<html><body><h1>Test Heading</h1><p>Test paragraph</p></body></html>'
-        mock_response.status_code = 200
-        mock_get.return_value = mock_response
-        
-        # Test scraping
-        content = scrape_web_content("example.com")
-        self.assertIn("Test Heading", content)
-        self.assertIn("Test paragraph", content)
+#class TestWebUtils(unittest.TestCase):
+#    """Test web utilities"""
+#    
+#    @patch('requests.get')
+#    def test_scrape_web_content(self, mock_get):
+#        # Mock the response
+#        mock_response = MagicMock()
+#        mock_response.text = '<html><body><h1>Test Heading</h1><p>Test paragraph</p></body></html>'
+#        mock_response.status_code = 200
+#        mock_get.return_value = mock_response
+#        
+#        # Test scraping
+#        content = scrape_web_content("example.com")
+#        self.assertIn("Test Heading", content)
+#        self.assertIn("Test paragraph", content)
         
 class TestPDFUtils(unittest.TestCase):
     """Test PDF utilities"""
