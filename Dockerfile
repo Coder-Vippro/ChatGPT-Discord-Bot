@@ -35,7 +35,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install runtime dependencies
 RUN apk add --no-cache libstdc++ 
-RUN apk add --no-cache gcc
 RUN apk add --no-cache g++
 
 # Set the working directory
