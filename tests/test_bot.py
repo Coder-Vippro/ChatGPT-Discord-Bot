@@ -335,7 +335,7 @@ class TestWebUtils(unittest.TestCase):
         mock_get.return_value = mock_response
         
         # Test scraping
-        content = scrape_web_content("https://vnexpress.net")
+        content = scrape_web_content("example.com")
         self.assertIn("Test Heading", content)
         self.assertIn("Test paragraph", content)
         
