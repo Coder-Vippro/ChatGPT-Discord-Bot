@@ -4,6 +4,7 @@ import re
 from bs4 import BeautifulSoup
 from typing import Dict, List, Any, Optional
 from src.config.config import GOOGLE_API_KEY, GOOGLE_CX
+import tiktoken  # Add tiktoken for token counting
 
 def google_custom_search(query: str, num_results: int = 3, auto_scrape: bool = True) -> dict:
     """
@@ -62,12 +63,13 @@ def google_custom_search(query: str, num_results: int = 3, auto_scrape: bool = T
             'results': []
         }
 
-def scrape_web_content(url: str) -> str:
+def scrape_web_content(url: str, max_tokens: int = 5000) -> str:
     """
-    Scrape content from a webpage.
+    Scrape content from a webpage and limit by token count.
     
     Args:
         url (str): URL of the webpage to scrape
+        max_tokens (int): Maximum number of tokens to return
         
     Returns:
         str: The scraped text content or error message
@@ -102,9 +104,22 @@ def scrape_web_content(url: str) -> str:
         lines = (line.strip() for line in text.splitlines())
         text = '\n'.join(line for line in lines if line)
         
-        # Limit the amount of text to avoid overwhelming the model
-        if len(text) > 5000:
-            text = text[:5000] + "...\n[Content truncated due to length]"
+        # Count tokens and truncate if needed
+        try:
+            # Use cl100k_base encoder which is used by most recent models
+            encoding = tiktoken.get_encoding("cl100k_base")
+            tokens = encoding.encode(text)
+            
+            # Truncate if token count exceeds max_tokens
+            if len(tokens) > max_tokens:
+                # Truncate to max_tokens
+                truncated_tokens = tokens[:max_tokens]
+                text = encoding.decode(truncated_tokens)
+                text += "...\n[Content truncated due to token limit]"
+        except ImportError:
+            # Fallback to character-based truncation if tiktoken is not available
+            if len(text) > max_tokens * 4:  # Rough estimate: 1 token ≈ 4 characters
+                text = text[:max_tokens * 4] + "...\n[Content truncated due to length]"
             
         return text
         
