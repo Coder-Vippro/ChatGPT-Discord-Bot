@@ -107,7 +107,7 @@ def scrape_web_content(url: str, max_tokens: int = 5000) -> str:
         # Count tokens and truncate if needed
         try:
             # Use cl100k_base encoder which is used by most recent models
-            encoding = tiktoken.get_encoding("cl100k_base")
+            encoding = tiktoken.get_encoding("o200k_base")
             tokens = encoding.encode(text)
             
             # Truncate if token count exceeds max_tokens
