@@ -23,36 +23,30 @@ logger = logging.getLogger(__name__)
 _driver = None
 
 def get_chrome_driver(headless=True):
-    """
-    Initialize or return existing undetected Chrome driver
-    
-    Args:
-        headless (bool): Whether to run Chrome in headless mode
-        
-    Returns:
-        WebDriver: Undetected Chrome WebDriver instance
-    """
     global _driver
-    
     try:
         if _driver is None:
             options = uc.ChromeOptions()
             if headless:
-                options.add_argument('--headless')
+                options.add_argument('--headless=new')  # Tránh bị block
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-extensions')
             options.add_argument('--disable-popup-blocking')
-            options.add_argument('--blink-settings=imagesEnabled=false')  # Disable images for faster loading
+            options.add_argument('--blink-settings=imagesEnabled=false')
+            options.add_argument('--disable-blink-features=AutomationControlled')  # Bỏ flag tự động hóa
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')  # Fake User-Agent
             
             _driver = uc.Chrome(options=options)
-            _driver.set_page_load_timeout(30)  # 30 second timeout
+            _driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")  # Xóa dấu hiệu WebDriver
+            _driver.set_page_load_timeout(30)
             logger.info("Chrome driver initialized")
         return _driver
     except Exception as e:
         logger.error(f"Failed to initialize Chrome driver: {str(e)}")
         return None
+
 
 def google_custom_search(query: str, num_results: int = 5, max_tokens: int = 4000) -> dict:
     """

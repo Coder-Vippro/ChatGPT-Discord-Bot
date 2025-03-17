@@ -7,4 +7,5 @@ tests/__pycache__/test_bot.cpython-312.pyc
 .vscode/settings.json
 chatgpt.zip
 response.txt
-logs
+logs/
+logs/discord_bot.log

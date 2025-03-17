@@ -60,3 +60,251 @@
 2025-03-15 21:49:35,344 - code_execution - INFO - Platform: Linux-6.11.0-19-generic-x86_64-with-glibc2.39, Python: 3.12.3 (main, Feb  4 2025, 14:48:35) [GCC 13.3.0]
 2025-03-15 21:49:35,344 - code_execution - INFO - Found python3 at: /usr/bin/python3
 2025-03-15 21:49:35,344 - code_execution - INFO - Using Python executable: /usr/bin/python3
+2025-03-17 17:39:58,824 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 17:39:58,824 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 17:39:59,082 - root - INFO - OpenAI client initialized successfully
+2025-03-17 17:39:59,082 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 17:39:59,082 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 17:40:00,606 - discord.client - INFO - logging in using static token
+2025-03-17 17:40:00,606 - discord.client - INFO - logging in using static token
+2025-03-17 17:40:02,623 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 535f32005543a58a3c1e70cb895dc47d).
+2025-03-17 17:40:02,623 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 535f32005543a58a3c1e70cb895dc47d).
+2025-03-17 17:43:38,451 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 17:43:38,451 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 17:43:38,731 - root - INFO - OpenAI client initialized successfully
+2025-03-17 17:43:38,731 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 17:43:38,731 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 17:43:40,152 - discord.client - INFO - logging in using static token
+2025-03-17 17:43:40,152 - discord.client - INFO - logging in using static token
+2025-03-17 17:43:41,706 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 90ea04240c4b1e8ab5fdee5cc3255936).
+2025-03-17 17:43:41,706 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 90ea04240c4b1e8ab5fdee5cc3255936).
+2025-03-17 17:44:32,653 - discord.gateway - WARNING - Shard ID None heartbeat blocked for more than 10 seconds.
+Loop thread traceback (most recent call last):
+  File "D:\Works\ChatGPT-Discord-Bot\bot.py", line 283, in <module>
+    asyncio.run(main())
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1987, in _run_once
+    handle._run()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1151, in wrapper
+    await self._call(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 858, in _do_call
+    return await self._callback(interaction, **params)  # type: ignore
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 221, in web
+    await process_request(interaction, process_web, url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 65, in process_request
+    await process_queue(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 75, in process_queue
+    await command_func(interaction, *args)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 185, in process_web
+    content = scrape_web_content(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 326, in scrape_web_content
+    return scrape_web_content_with_count(url, max_tokens)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 255, in scrape_web_content_with_count
+    content = scrape_with_selenium(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 199, in scrape_with_selenium
+    driver.get(url)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\undetected_chromedriver\__init__.py", line 629, in get_wrapped
+    return orig_get(*args, **kwargs)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\undetected_chromedriver\__init__.py", line 665, in get
+    return super().get(url)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 454, in get
+    self.execute(Command.GET, {"url": url})
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 427, in execute
+    response = self.command_executor.execute(driver_command, params)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\remote_connection.py", line 404, in execute
+    return self._request(command_info[0], url, body=data)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\remote_connection.py", line 428, in _request
+    response = self._conn.request(method, url, body=body, headers=headers, timeout=self._client_config.timeout)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\_request_methods.py", line 143, in request
+    return self.request_encode_body(
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\_request_methods.py", line 278, in request_encode_body
+    return self.urlopen(method, url, **extra_kw)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\poolmanager.py", line 443, in urlopen
+    response = conn.urlopen(method, u.request_uri, **kw)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connectionpool.py", line 534, in _make_request
+    response = conn.getresponse()
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connection.py", line 516, in getresponse
+    httplib_response = super().getresponse()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1428, in getresponse
+    response.begin()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 331, in begin
+    version, status, reason = self._read_status()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 292, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\socket.py", line 707, in readinto
+    return self._sock.recv_into(b)
+
+2025-03-17 17:44:32,653 - discord.gateway - WARNING - Shard ID None heartbeat blocked for more than 10 seconds.
+Loop thread traceback (most recent call last):
+  File "D:\Works\ChatGPT-Discord-Bot\bot.py", line 283, in <module>
+    asyncio.run(main())
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1987, in _run_once
+    handle._run()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1151, in wrapper
+    await self._call(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 858, in _do_call
+    return await self._callback(interaction, **params)  # type: ignore
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 221, in web
+    await process_request(interaction, process_web, url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 65, in process_request
+    await process_queue(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 75, in process_queue
+    await command_func(interaction, *args)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 185, in process_web
+    content = scrape_web_content(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 326, in scrape_web_content
+    return scrape_web_content_with_count(url, max_tokens)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 255, in scrape_web_content_with_count
+    content = scrape_with_selenium(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 199, in scrape_with_selenium
+    driver.get(url)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\undetected_chromedriver\__init__.py", line 629, in get_wrapped
+    return orig_get(*args, **kwargs)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\undetected_chromedriver\__init__.py", line 665, in get
+    return super().get(url)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 454, in get
+    self.execute(Command.GET, {"url": url})
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\webdriver.py", line 427, in execute
+    response = self.command_executor.execute(driver_command, params)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\remote_connection.py", line 404, in execute
+    return self._request(command_info[0], url, body=data)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\selenium\webdriver\remote\remote_connection.py", line 428, in _request
+    response = self._conn.request(method, url, body=body, headers=headers, timeout=self._client_config.timeout)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\_request_methods.py", line 143, in request
+    return self.request_encode_body(
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\_request_methods.py", line 278, in request_encode_body
+    return self.urlopen(method, url, **extra_kw)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\poolmanager.py", line 443, in urlopen
+    response = conn.urlopen(method, u.request_uri, **kw)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connectionpool.py", line 787, in urlopen
+    response = self._make_request(
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connectionpool.py", line 534, in _make_request
+    response = conn.getresponse()
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\urllib3\connection.py", line 516, in getresponse
+    httplib_response = super().getresponse()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 1428, in getresponse
+    response.begin()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 331, in begin
+    version, status, reason = self._read_status()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\http\client.py", line 292, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\socket.py", line 707, in readinto
+    return self._sock.recv_into(b)
+
+2025-03-17 17:44:42,656 - discord.gateway - WARNING - Shard ID None heartbeat blocked for more than 20 seconds.
+Loop thread traceback (most recent call last):
+  File "D:\Works\ChatGPT-Discord-Bot\bot.py", line 283, in <module>
+    asyncio.run(main())
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1987, in _run_once
+    handle._run()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1151, in wrapper
+    await self._call(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 858, in _do_call
+    return await self._callback(interaction, **params)  # type: ignore
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 221, in web
+    await process_request(interaction, process_web, url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 65, in process_request
+    await process_queue(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 75, in process_queue
+    await command_func(interaction, *args)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 185, in process_web
+    content = scrape_web_content(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 326, in scrape_web_content
+    return scrape_web_content_with_count(url, max_tokens)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 255, in scrape_web_content_with_count
+    content = scrape_with_selenium(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 207, in scrape_with_selenium
+    time.sleep(2)
+
+2025-03-17 17:44:42,656 - discord.gateway - WARNING - Shard ID None heartbeat blocked for more than 20 seconds.
+Loop thread traceback (most recent call last):
+  File "D:\Works\ChatGPT-Discord-Bot\bot.py", line 283, in <module>
+    asyncio.run(main())
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 194, in run
+    return runner.run(main)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 674, in run_until_complete
+    self.run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\windows_events.py", line 322, in run_forever
+    super().run_forever()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 641, in run_forever
+    self._run_once()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\base_events.py", line 1987, in _run_once
+    handle._run()
+  File "C:\Users\Vu Quoc Anh\AppData\Local\Programs\Python\Python312\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1151, in wrapper
+    await self._call(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\tree.py", line 1310, in _call
+    await command._invoke_with_namespace(interaction, namespace)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 883, in _invoke_with_namespace
+    return await self._do_call(interaction, transformed_values)
+  File "D:\Works\ChatGPT-Discord-Bot\.venv\Lib\site-packages\discord\app_commands\commands.py", line 858, in _do_call
+    return await self._callback(interaction, **params)  # type: ignore
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 221, in web
+    await process_request(interaction, process_web, url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 65, in process_request
+    await process_queue(interaction)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 75, in process_queue
+    await command_func(interaction, *args)
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 185, in process_web
+    content = scrape_web_content(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 326, in scrape_web_content
+    return scrape_web_content_with_count(url, max_tokens)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 255, in scrape_web_content_with_count
+    content = scrape_with_selenium(url)
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 207, in scrape_with_selenium
+    time.sleep(2)
+
+2025-03-17 17:44:44,039 - discord.gateway - INFO - Shard ID None has successfully RESUMED session 90ea04240c4b1e8ab5fdee5cc3255936.
+2025-03-17 17:44:44,039 - discord.gateway - INFO - Shard ID None has successfully RESUMED session 90ea04240c4b1e8ab5fdee5cc3255936.

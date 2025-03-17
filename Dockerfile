@@ -16,6 +16,12 @@ RUN apk add --no-cache \
     cargo \
     build-base
 
+# Install Chromium & ChromeDriver
+RUN apk add --no-cache \
+    chromium \
+    chromium-chromedriver \
+    xvfb
+
 # Set the working directory
 WORKDIR /app
 
@@ -34,8 +40,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # Install runtime dependencies
-RUN apk add --no-cache libstdc++ 
-RUN apk add --no-cache g++
+RUN apk add --no-cache \
+    libstdc++ \
+    g++ \
+    chromium \
+    chromium-chromedriver \
+    xvfb
 
 # Set the working directory
 WORKDIR /usr/src/discordbot
