@@ -159,8 +159,20 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                 history.append({"role": "assistant", "content": reply})
                 await db_handler.save_history(user_id, history)
 
-                # Send the response
-                await interaction.followup.send(reply)
+                # Check if the reply exceeds Discord's character limit (2000)
+                if len(reply) > 2000:
+                    # Create a text file with the full response
+                    file_bytes = io.BytesIO(reply.encode('utf-8'))
+                    file = discord.File(file_bytes, filename="search_response.txt")
+                    
+                    # Send a short message with the file attachment
+                    await interaction.followup.send(
+                        f"The search response for '{query}' is too long for Discord (>{len(reply)} characters). Here's the full response as a text file:", 
+                        file=file
+                    )
+                else:
+                    # Send as normal message if within limits
+                    await interaction.followup.send(reply)
 
             except Exception as e:
                 error_message = f"Search error: {str(e)}"
@@ -213,7 +225,20 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                 history.append({"role": "assistant", "content": reply})
                 await db_handler.save_history(user_id, history)
 
-                await interaction.followup.send(reply)
+                # Check if the reply exceeds Discord's character limit (2000)
+                if len(reply) > 2000:
+                    # Create a text file with the full response
+                    file_bytes = io.BytesIO(reply.encode('utf-8'))
+                    file = discord.File(file_bytes, filename="web_response.txt")
+                    
+                    # Send a short message with the file attachment
+                    await interaction.followup.send(
+                        f"The response from analyzing {url} is too long for Discord (>{len(reply)} characters). Here's the full response as a text file:", 
+                        file=file
+                    )
+                else:
+                    # Send as normal message if within limits
+                    await interaction.followup.send(reply)
 
             except Exception as e:
                 await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
