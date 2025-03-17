@@ -332,3 +332,21 @@ ModuleNotFoundError: No module named 'webdriver_manager'
 2025-03-17 18:29:02,944 - discord.client - INFO - logging in using static token
 2025-03-17 18:29:04,602 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 51890436614b33c075d3680fd70c7153).
 2025-03-17 18:29:04,602 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 51890436614b33c075d3680fd70c7153).
+2025-03-17 20:13:59,803 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 20:13:59,804 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 20:14:00,345 - root - INFO - OpenAI client initialized successfully
+2025-03-17 20:14:00,358 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 20:14:00,358 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 20:14:01,950 - discord.client - INFO - logging in using static token
+2025-03-17 20:14:01,950 - discord.client - INFO - logging in using static token
+2025-03-17 20:14:03,551 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 4449a8224d0b4920e9db79a99810d5e0).
+2025-03-17 20:14:03,551 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 4449a8224d0b4920e9db79a99810d5e0).
+2025-03-17 20:26:27,077 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 20:26:27,077 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 20:26:27,364 - root - INFO - OpenAI client initialized successfully
+2025-03-17 20:26:27,364 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 20:26:27,364 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 20:26:28,897 - discord.client - INFO - logging in using static token
+2025-03-17 20:26:28,897 - discord.client - INFO - logging in using static token
+2025-03-17 20:26:30,644 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 2aa1eadaa4d43faa234645567961e67f).
+2025-03-17 20:26:30,644 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 2aa1eadaa4d43faa234645567961e67f).

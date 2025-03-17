@@ -124,7 +124,7 @@ async def scrape_multiple_links_async(links: List[str], max_tokens: int) -> Tupl
                     break
                     
                 try:
-                    text = await scrape_with_playwright(link)
+                    text = await scrape_web_content(link)
                     if text:
                         tokens = len(enc.encode(text))
                         if token_count + tokens <= max_tokens:
@@ -149,7 +149,7 @@ def extract_main_content(soup):
     # Fallback to body content if no main content found
     return ' '.join(soup.stripped_strings)
 
-async def scrape_with_playwright(url):
+async def scrape_web_content(url):
     """Use Playwright with stealth mode for websites that block bots"""
     try:
         async with async_playwright() as p:
