@@ -308,3 +308,27 @@ Loop thread traceback (most recent call last):
 
 2025-03-17 17:44:44,039 - discord.gateway - INFO - Shard ID None has successfully RESUMED session 90ea04240c4b1e8ab5fdee5cc3255936.
 2025-03-17 17:44:44,039 - discord.gateway - INFO - Shard ID None has successfully RESUMED session 90ea04240c4b1e8ab5fdee5cc3255936.
+2025-03-17 18:28:29,575 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 18:28:29,575 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 18:28:30,093 - root - INFO - OpenAI client initialized successfully
+2025-03-17 18:28:30,093 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 18:28:30,093 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 18:28:31,614 - root - CRITICAL - Fatal error in main function: No module named 'webdriver_manager'
+Traceback (most recent call last):
+  File "D:\Works\ChatGPT-Discord-Bot\bot.py", line 209, in main
+    from src.commands.commands import setup_commands
+  File "D:\Works\ChatGPT-Discord-Bot\src\commands\commands.py", line 11, in <module>
+    from src.utils.web_utils import google_custom_search, scrape_web_content
+  File "D:\Works\ChatGPT-Discord-Bot\src\utils\web_utils.py", line 15, in <module>
+    from webdriver_manager.chrome import ChromeDriverManager
+ModuleNotFoundError: No module named 'webdriver_manager'
+
+2025-03-17 18:29:01,018 - root - INFO - Configured logging from dictionary configuration
+2025-03-17 18:29:01,018 - root - INFO - Webhook logging enabled at level INFO
+2025-03-17 18:29:01,367 - root - INFO - OpenAI client initialized successfully
+2025-03-17 18:29:01,367 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 18:29:01,367 - discord.client - WARNING - PyNaCl is not installed, voice will NOT be supported
+2025-03-17 18:29:02,944 - discord.client - INFO - logging in using static token
+2025-03-17 18:29:02,944 - discord.client - INFO - logging in using static token
+2025-03-17 18:29:04,602 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 51890436614b33c075d3680fd70c7153).
+2025-03-17 18:29:04,602 - discord.gateway - INFO - Shard ID None has connected to Gateway (Session ID: 51890436614b33c075d3680fd70c7153).

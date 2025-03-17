@@ -1,26 +1,18 @@
 # Build stage with all build dependencies
-FROM python:3.12.3-alpine AS builder
+FROM python:3.12.3-slim AS builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONHASHSEED=0
 
 # Install build dependencies
-RUN apk add --no-cache \
-    curl \
-    g++ \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     gcc \
-    musl-dev \
-    make \
-    rust \
-    cargo \
-    build-base
-
-# Install Chromium & ChromeDriver
-RUN apk add --no-cache \
-    chromium \
-    chromium-chromedriver \
-    xvfb
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /app
@@ -28,34 +20,45 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python packages with BuildKit cache
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python packages with pip
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Runtime stage with minimal dependencies
-FROM python:3.12.3-alpine
+FROM python:3.12.3-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install runtime dependencies
-RUN apk add --no-cache \
-    libstdc++ \
-    g++ \
-    chromium \
-    chromium-chromedriver \
-    xvfb
+# Install Playwright Firefox (much lighter than Chrome)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    libglib2.0-0 \
+    libnss3 \
+    libx11-xcb1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
 WORKDIR /usr/src/discordbot
 
-# Copy installed Python packages from builder - using correct site-packages path
+# Copy installed Python packages from builder
 COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy the application source code
 COPY . .
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    g++ \
+# Install Playwright Firefox (instead of Chrome)
+RUN playwright install --with-deps firefox
+
+# Memory optimization for Raspberry Pi
+ENV NODE_OPTIONS=--max_old_space_size=256
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/src/discordbot/.playwright-browsers
 
 # Command to run the application
 CMD ["python3", "bot.py"]
