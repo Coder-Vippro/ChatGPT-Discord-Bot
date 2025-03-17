@@ -28,9 +28,11 @@ FROM python:3.12.3-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    NODE_OPTIONS=--max_old_space_size=256 \
+    PLAYWRIGHT_BROWSERS_PATH=/usr/src/discordbot/.playwright-browsers
 
-# Install Playwright Firefox (much lighter than Chrome)
+# Install Firefox dependencies in a single RUN to reduce layers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -38,6 +40,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libnss3 \
     libx11-xcb1 \
+    g++ \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,14 +67,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy the application source code
 COPY . .
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    g++ \
 # Install Playwright Firefox (instead of Chrome)
 RUN playwright install --with-deps firefox
-
-# Memory optimization for Raspberry Pi
-ENV NODE_OPTIONS=--max_old_space_size=256
-ENV PLAYWRIGHT_BROWSERS_PATH=/usr/src/discordbot/.playwright-browsers
 
 # Command to run the application
 CMD ["python3", "bot.py"]
