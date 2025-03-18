@@ -8,6 +8,7 @@ import concurrent.futures
 from typing import Dict, Any
 import io
 import aiohttp
+from datetime import datetime
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks, execute_code
@@ -228,7 +229,8 @@ class MessageHandler:
                                 "image_url": {
                                     "url": attachment.url,
                                     "detail": "auto"
-                                }
+                                },
+                                "timestamp": datetime.now().isoformat()  # Add timestamp to track image expiration
                             })
                         else:
                             content.append({"type": "text", "text": f"[Attachment: {attachment.filename}] - I can't process this type of file directly."})
@@ -378,6 +380,32 @@ class MessageHandler:
                                     data = json.loads(content) if '{' in content else {}
                                     if 'image_urls' in data:
                                         image_urls = data.get('image_urls', [])
+                                        
+                                        # Add timestamp to AI-generated images in the message content for storage
+                                        # This affects how they're stored in history
+                                        if reply and image_urls and image_generation_used:
+                                            current_time = datetime.now().isoformat()
+                                            for i, img_url in enumerate(image_urls):
+                                                # If the URL appears in the assistant's reply, we'll need to track it in history
+                                                if img_url in reply:
+                                                    # Update the reply to include timestamp information
+                                                    # We'll use this in the history filter
+                                                    img_data = {
+                                                        "type": "image_url",
+                                                        "image_url": {"url": img_url, "detail": "auto"},
+                                                        "timestamp": current_time
+                                                    }
+                                                    # Store in history with appropriate format that includes timestamp
+                                                    if isinstance(reply, str):
+                                                        # Convert to content array if it's a simple string
+                                                        if model in ["o1-mini", "o1-preview"]:
+                                                            history_without_system[-1]["content"] = [
+                                                                {"type": "text", "text": reply}
+                                                            ] + [img_data]
+                                                        else:
+                                                            history[-1]["content"] = [
+                                                                {"type": "text", "text": reply}
+                                                            ] + [img_data]
                             except Exception as e:
                                 logging.error(f"Error parsing image URLs: {str(e)}")
                     

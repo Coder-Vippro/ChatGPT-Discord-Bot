@@ -3,6 +3,8 @@ from typing import List, Dict, Any, Optional
 import functools
 import asyncio
 from datetime import datetime, timedelta
+import logging
+import re
 
 class DatabaseHandler:
     # Class-level cache for database results
@@ -49,16 +51,64 @@ class DatabaseHandler:
     
     # User history methods
     async def get_history(self, user_id: int) -> List[Dict[str, Any]]:
-        """Get user conversation history with caching"""
+        """Get user conversation history with caching and filter expired image links"""
         cache_key = f"history_{user_id}"
         
         async def fetch_history():
             user_data = await self.db.user_histories.find_one({'user_id': user_id})
             if user_data and 'history' in user_data:
-                return user_data['history']
+                # Filter out expired image links
+                filtered_history = self._filter_expired_images(user_data['history'])
+                return filtered_history
             return []
             
         return await self._get_cached_result(cache_key, fetch_history, 30)  # 30 second cache
+    
+    def _filter_expired_images(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filter out image links that are older than 23 hours"""
+        current_time = datetime.now()
+        expiration_time = current_time - timedelta(hours=23)
+        
+        filtered_history = []
+        for msg in history:
+            # Keep system messages unchanged
+            if msg.get('role') == 'system':
+                filtered_history.append(msg)
+                continue
+                
+            # Check if message has 'content' field as a list (which may contain image URLs)
+            content = msg.get('content')
+            if isinstance(content, list):
+                # Filter content items
+                filtered_content = []
+                for item in content:
+                    # Keep text items
+                    if item.get('type') == 'text':
+                        filtered_content.append(item)
+                    # Check image items for timestamp
+                    elif item.get('type') == 'image_url':
+                        # If there's no timestamp or timestamp is newer than expiration time, keep it
+                        timestamp = item.get('timestamp')
+                        if not timestamp or datetime.fromisoformat(timestamp) > expiration_time:
+                            filtered_content.append(item)
+                        else:
+                            logging.info(f"Filtering out expired image URL (added at {timestamp})")
+                
+                # Update the message with filtered content
+                if filtered_content:
+                    new_msg = dict(msg)
+                    new_msg['content'] = filtered_content
+                    filtered_history.append(new_msg)
+                else:
+                    # If after filtering there's no content, add a placeholder text
+                    new_msg = dict(msg)
+                    new_msg['content'] = [{"type": "text", "text": "[Image content expired]"}]
+                    filtered_history.append(new_msg)
+            else:
+                # For string content or other formats, keep as is
+                filtered_history.append(msg)
+                
+        return filtered_history
     
     async def save_history(self, user_id: int, history: List[Dict[str, Any]]) -> None:
         """Save user conversation history and update cache"""
