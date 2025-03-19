@@ -27,6 +27,17 @@ class DatabaseHandler:
         )
         self.db = self.client['chatgpt_discord_bot']  # Database name
         
+        # Collections
+        self.users_collection = self.db.users
+        self.history_collection = self.db.history
+        self.admin_collection = self.db.admin
+        self.blacklist_collection = self.db.blacklist
+        self.whitelist_collection = self.db.whitelist
+        self.logs_collection = self.db.logs
+        self.reminders_collection = self.db.reminders
+        
+        logging.info("Database handler initialized")
+    
     # Helper for caching results
     async def _get_cached_result(self, cache_key, fetch_func, expiry_seconds=60):
         """Get result from cache or execute fetch_func if not cached/expired"""
@@ -239,6 +250,16 @@ class DatabaseHandler:
         await self.db.whitelist.create_index("user_id")
         await self.db.blacklist.create_index("user_id")
         
+    async def ensure_reminders_collection(self):
+        """
+        Ensure the reminders collection exists and create necessary indexes
+        """
+        # Create the collection if it doesn't exist
+        await self.reminders_collection.create_index([("user_id", 1), ("sent", 1)])
+        await self.reminders_collection.create_index([("remind_at", 1), ("sent", 1)])
+        logging.info("Ensured reminders collection and indexes")
+
     async def close(self):
         """Properly close the database connection"""
         self.client.close()
+        logging.info("Database connection closed")

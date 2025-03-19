@@ -9,6 +9,8 @@ import time
 import logging.config
 from discord.ext import commands, tasks
 from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv
+from discord import app_commands
 
 # Import configuration
 from src.config.config import (
@@ -32,6 +34,9 @@ from src.utils.image_utils import ImageGenerator
 
 # Global shutdown flag
 shutdown_flag = asyncio.Event()
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging with more detail, rotation, and webhook integration
 def setup_logging():
@@ -171,6 +176,9 @@ async def main():
         # Create database indexes for performance
         await db_handler.create_indexes()
         logging.info("Database indexes created")
+        
+        # Khởi tạo collection reminders
+        await db_handler.ensure_reminders_collection()
         
         # Event handler when the bot is ready
         @bot.event

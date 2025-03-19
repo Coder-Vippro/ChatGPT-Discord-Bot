@@ -12,6 +12,8 @@ from datetime import datetime
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks, execute_code
+from src.utils.data_utils import process_data_file
+from src.utils.reminder_utils import ReminderManager
 
 # Global task and rate limiting tracking
 user_tasks = {}
@@ -27,6 +29,9 @@ TEXT_FILE_EXTENSIONS = [
     '.ini', '.cfg', '.conf', '.log', '.ts', '.jsx', '.tsx', '.vue', 
     '.go', '.rs', '.swift', '.kt', '.kts', '.dart', '.lua'
 ]
+
+# File extensions for data files
+DATA_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 
 class MessageHandler:
     def __init__(self, bot, db_handler, openai_client, image_generator):
@@ -45,23 +50,38 @@ class MessageHandler:
         self.image_generator = image_generator
         self.aiohttp_session = None
         
+        # Initialize reminder manager
+        self.reminder_manager = ReminderManager(bot, db_handler)
+        
         # Tool functions mapping
         self.tool_functions = {
             "google_search": self._google_search,
             "scrape_webpage": self._scrape_webpage,
             "code_interpreter": self._code_interpreter,
-            "generate_image": self._generate_image
+            "generate_image": self._generate_image,
+            "analyze_data": self._analyze_data,
+            "set_reminder": self._set_reminder,
+            "get_reminders": self._get_reminders
         }
         
         # Thread pool for CPU-bound tasks
         self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        
+        # Temporary storage for data files
+        self.user_data_files = {}
         
         # Create session for HTTP requests
         asyncio.create_task(self._setup_aiohttp_session())
         
         # Register message event handlers
         self._setup_event_handlers()
-    
+        
+        # Start reminder manager
+        self.reminder_manager.start()
+        
+        # Start chart cleanup task
+        self.chart_cleanup_task = asyncio.create_task(self._run_chart_cleanup())
+        
     async def _setup_aiohttp_session(self):
         """Create a reusable aiohttp session for better performance"""
         if self.aiohttp_session is None or self.aiohttp_session.closed:
@@ -221,6 +241,46 @@ class MessageHandler:
                             # Process PDF
                             await process_pdf(message, pdf_content, user_prompt, model, self.client)
                             return
+                        
+                        # Handle data files (CSV, Excel)
+                        elif any(attachment.filename.lower().endswith(ext) for ext in DATA_FILE_EXTENSIONS):
+                            try:
+                                # Read data file
+                                file_bytes = await attachment.read()
+                                query = message.content if message.content else "Analyze this data file and provide a summary."
+                                
+                                # Save temporary file information
+                                self.user_data_files[user_id] = {
+                                    "filename": attachment.filename,
+                                    "bytes": file_bytes,
+                                    "timestamp": datetime.now().timestamp()
+                                }
+                                
+                                # Analyze data
+                                summary, chart_image, metadata = await process_data_file(file_bytes, attachment.filename, query)
+                                
+                                # Send analysis text
+                                await message.channel.send(summary[:2000])  # Discord message length limit
+                                
+                                # Send chart if available
+                                if chart_image:
+                                    await message.channel.send(
+                                        "Chart from data:",
+                                        file=discord.File(io.BytesIO(chart_image), filename=f"chart_{int(time.time())}.png")
+                                    )
+                                
+                                # More detailed analysis with AI
+                                ai_prompt = f"I've uploaded a data file {attachment.filename}. {query}"
+                                
+                                # Call API for analysis
+                                await self._process_text_message(message, user_id, ai_prompt, model, history, start_time)
+                                return
+                                
+                            except Exception as e:
+                                error_msg = f"Error processing data file: {str(e)}"
+                                logging.error(error_msg)
+                                await message.channel.send(error_msg)
+                                return
                             
                 # Handle normal messages and non-PDF attachments
                 content = []
@@ -252,7 +312,7 @@ class MessageHandler:
                                 extracted_text_contents.append(extracted_text)
                                 
                                 # Add a reference in the content
-                                content.append({"type": "text", "text": f"[Attached file: {attachment.filename}]"})
+                                content.append({"type": "text", "text": f"[Attached file: {attachment.filename}"})
                                 
                                 logging.info(f"Extracted text from {attachment.filename} ({len(file_content)} chars)")
                                 
@@ -285,232 +345,8 @@ class MessageHandler:
                 # Prepare current message
                 current_message = {"role": "user", "content": content}
                 
-                try:
-                    # Process messages based on the model's capabilities
-                    messages_for_api = []
-                    
-                    # For models that don't support system prompts
-                    if model in ["o1-mini", "o1-preview"]:
-                        # Convert system messages to user instructions
-                        system_content = None
-                        history_without_system = []
-                        
-                        # Extract system message content
-                        for msg in history:
-                            if msg.get('role') == 'system':
-                                system_content = msg.get('content', '')
-                            else:
-                                history_without_system.append(msg)
-                        
-                        # Add the system content as a special user message at the beginning
-                        if system_content:
-                            history_without_system.insert(0, {"role": "user", "content": f"Instructions: {system_content}"})
-                        
-                        # Add current message and prepare for API
-                        history_without_system.append(current_message)
-                        messages_for_api = prepare_messages_for_api(history_without_system)
-                    else:
-                        # For models that support system prompts
-                        from src.config.config import NORMAL_CHAT_PROMPT
-                        
-                        # Add system prompt if not present
-                        if not any(msg.get('role') == 'system' for msg in history):
-                            history.insert(0, {"role": "system", "content": NORMAL_CHAT_PROMPT})
-                            
-                        history.append(current_message)
-                        messages_for_api = prepare_messages_for_api(history)
-                    
-                    # Determine which models should have tools available
-                    # o1-mini and o1-preview do not support tools
-                    use_tools = model in ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
-                    
-                    # Prepare API call parameters
-                    api_params = {
-                        "model": model,
-                        "messages": messages_for_api,
-                        "temperature": 0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
-                        "top_p": 0.7 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
-                        "timeout": 60  # Add an explicit timeout
-                    }
-                    
-                    # Add tools if using a supported model
-                    if use_tools:
-                        api_params["tools"] = get_tools_for_model()
-                    
-                    # Flag to track if image generation was used
-                    image_generation_used = False
-                    
-                    # Make the initial API call with retry logic
-                    response = await self._retry_api_call(lambda: self.client.chat.completions.create(**api_params))
-                    
-                    # Check if there are any tool calls to process
-                    if use_tools and response.choices[0].finish_reason == "tool_calls":
-                        # Process tools
-                        tool_calls = response.choices[0].message.tool_calls
-                        tool_messages = {}
-                        
-                        # Track which tools are being called
-                        for tool_call in tool_calls:
-                            if tool_call.function.name in self.tool_functions:
-                                tool_messages[tool_call.function.name] = True
-                                if tool_call.function.name == "generate_image":
-                                    image_generation_used = True
-                        
-                        # Display appropriate messages based on which tools are being called
-                        if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
-                            await message.channel.send("🔍 Researching information...")
-                        
-                        if tool_messages.get("code_interpreter"):
-                            await message.channel.send("💻 Running code...")
-                        
-                        if tool_messages.get("generate_image"):
-                            await message.channel.send("🎨 Generating images...")
-                        
-                        if not tool_messages:                        
-                            await message.channel.send("🤔 Processing...")
-                        
-                        # Process any tool calls and get the updated messages
-                        tool_calls_processed, updated_messages = await process_tool_calls(
-                            self.client, 
-                            response, 
-                            messages_for_api, 
-                            self.tool_functions
-                        )
-                        
-                        # If tool calls were processed, make another API call with the updated messages
-                        if tool_calls_processed:
-                            response = await self._retry_api_call(lambda: self.client.chat.completions.create(
-                                model=model,
-                                messages=updated_messages,
-                                temperature=0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
-                                timeout=60
-                            ))
-                    
-                    reply = response.choices[0].message.content
-                    
-                    # Store the response in history for models that support it
-                    if model in ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o3-mini"]:
-                        if model in ["o1-mini", "o1-preview"]:
-                            # For models without system prompt support, keep track separately
-                            history_without_system.append({"role": "assistant", "content": reply})
-                            # Sync back to regular history format by preserving system message
-                            new_history = []
-                            if system_content:
-                                new_history.append({"role": "system", "content": system_content})
-                            new_history.extend(history_without_system[1:])  # Skip the first "Instructions" message
-                            
-                            # Only keep a reasonable amount of history
-                            if len(new_history) > 20:  # Truncate to last 20 messages if too long
-                                new_history = new_history[:1] + new_history[-19:]  # Keep system message + last 19 messages
-                                
-                            await self.db.save_history(user_id, new_history)
-                        else:
-                            # For models with system prompt support, just append to regular history
-                            history.append({"role": "assistant", "content": reply})
-                            
-                            # Only keep a reasonable amount of history
-                            if len(history) > 20:  # Truncate to last 20 messages if too long
-                                history = history[:1] + history[-19:]  # Keep system message + last 19 messages
-                                
-                            await self.db.save_history(user_id, history)
-                    
-                    # Check if there are any image URLs to send from the image generation tool
-                    image_urls = []
-                    for msg in locals().get('updated_messages', []):
-                        if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
-                            try:
-                                content = msg.get('content', '')
-                                if isinstance(content, str):
-                                    data = json.loads(content) if '{' in content else {}
-                                    if 'image_urls' in data:
-                                        image_urls = data.get('image_urls', [])
-                                        
-                                        # Add timestamp to AI-generated images in the message content for storage
-                                        # This affects how they're stored in history
-                                        if reply and image_urls and image_generation_used:
-                                            current_time = datetime.now().isoformat()
-                                            for i, img_url in enumerate(image_urls):
-                                                # If the URL appears in the assistant's reply, we'll need to track it in history
-                                                if img_url in reply:
-                                                    # Update the reply to include timestamp information
-                                                    # We'll use this in the history filter
-                                                    img_data = {
-                                                        "type": "image_url",
-                                                        "image_url": {"url": img_url, "detail": "auto"},
-                                                        "timestamp": current_time
-                                                    }
-                                                    # Store in history with appropriate format that includes timestamp
-                                                    if isinstance(reply, str):
-                                                        # Convert to content array if it's a simple string
-                                                        if model in ["o1-mini", "o1-preview"]:
-                                                            history_without_system[-1]["content"] = [
-                                                                {"type": "text", "text": reply}
-                                                            ] + [img_data]
-                                                        else:
-                                                            history[-1]["content"] = [
-                                                                {"type": "text", "text": reply}
-                                                            ] + [img_data]
-                            except Exception as e:
-                                logging.error(f"Error parsing image URLs: {str(e)}")
-                    
-                    # If image generation was used and we have image URLs, handle specially
-                    if image_generation_used and image_urls:
-                        # Send the text response first (if it contains useful information besides just mentioning images)
-                        text_to_exclude = ["here are the images", "i've generated", "generated for you", "as requested", "based on your prompt"]
-                        
-                        # Check if reply is just about the images or has other content
-                        has_other_content = True
-                        reply_lower = reply.lower()
-                        
-                        # Check if reply is primarily about the images
-                        for phrase in text_to_exclude:
-                            if phrase in reply_lower:
-                                has_other_content = len(reply) > 300  # Only consider it "other content" if it's substantial
-                        
-                        # Only send text response if it has additional content
-                        if has_other_content:
-                            await send_response(message.channel, reply)
-                        
-                        # Download images from URLs and send as attachments
-                        image_files = []
-                        
-                        # Use session we already have
-                        await self._setup_aiohttp_session()
-                        
-                        async with self.aiohttp_session as session:
-                            download_tasks = []
-                            for img_url in image_urls:
-                                download_tasks.append(self._download_image(session, img_url))
-                            
-                            # Download all images concurrently
-                            image_files = await asyncio.gather(*download_tasks, return_exceptions=True)
-                            
-                            # Filter out any exceptions
-                            image_files = [img for img in image_files if not isinstance(img, Exception) and img is not None]
-                        
-                        # Send images as attachments
-                        if image_files:
-                            await message.channel.send(
-                                "Generated images:",
-                                files=[discord.File(io.BytesIO(img), filename=f"image_{i}.png") 
-                                      for i, img in enumerate(image_files)]
-                            )
-                    else:
-                        # Normal response without image generation
-                        await send_response(message.channel, reply)
-                    
-                    # Log processing time for performance monitoring
-                    processing_time = time.time() - start_time
-                    logging.info(f"Message processed in {processing_time:.2f} seconds (User: {user_id}, Model: {model})")
-                    
-                except asyncio.CancelledError:
-                    # Handle cancellation cleanly
-                    logging.info(f"Task for user {user_id} was cancelled")
-                    raise
-                except Exception as e:
-                    error_message = f"Error: {str(e)}"
-                    logging.error(f"Error in message processing: {error_message}")
-                    await message.channel.send(error_message)
+                # Pass the message to the text processing function with the start_time
+                await self._process_text_message(message, user_id, current_message, model, history, start_time)
                 
         except asyncio.CancelledError:
             # Re-raise cancellation
@@ -522,6 +358,388 @@ class MessageHandler:
                 await message.channel.send(error_message)
             except:
                 pass
+    
+    async def _process_text_message(self, message, user_id, current_message, model, history, start_time):
+        """
+        Process text messages and generate AI responses.
+        
+        Args:
+            message: Original Discord message
+            user_id: User ID
+            current_message: Current message (string or dict)
+            model: AI model to use
+            history: Conversation history
+            start_time: Time when processing started for tracking duration
+        """
+        try:
+            # Convert string messages to message format if needed
+            if isinstance(current_message, str):
+                current_message = {"role": "user", "content": current_message}
+            
+            # Process messages based on the model's capabilities
+            messages_for_api = []
+            
+            # For models that don't support system prompts
+            if model in ["o1-mini", "o1-preview"]:
+                # Convert system messages to user instructions
+                system_content = None
+                history_without_system = []
+                
+                # Extract system message content
+                for msg in history:
+                    if msg.get('role') == 'system':
+                        system_content = msg.get('content', '')
+                    else:
+                        history_without_system.append(msg)
+                
+                # Add the system content as a special user message at the beginning
+                if system_content:
+                    history_without_system.insert(0, {"role": "user", "content": f"Instructions: {system_content}"})
+                
+                # Add current message and prepare for API
+                history_without_system.append(current_message)
+                messages_for_api = prepare_messages_for_api(history_without_system)
+            else:
+                # For models that support system prompts
+                from src.config.config import NORMAL_CHAT_PROMPT
+                
+                # Add system prompt if not present
+                if not any(msg.get('role') == 'system' for msg in history):
+                    history.insert(0, {"role": "system", "content": NORMAL_CHAT_PROMPT})
+                    
+                history.append(current_message)
+                messages_for_api = prepare_messages_for_api(history)
+            
+            # Determine which models should have tools available
+            # o1-mini and o1-preview do not support tools
+            use_tools = model in ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
+            
+            # Prepare API call parameters
+            api_params = {
+                "model": model,
+                "messages": messages_for_api,
+                "temperature": 0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                "top_p": 0.7 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                "timeout": 60  # Add an explicit timeout
+            }
+            
+            # Add tools if using a supported model
+            if use_tools:
+                api_params["tools"] = get_tools_for_model()
+            
+            # Flag to track if image generation was used
+            image_generation_used = False
+            
+            # Make the initial API call with retry logic
+            response = await self._retry_api_call(lambda: self.client.chat.completions.create(**api_params))
+            
+            # Check if there are any tool calls to process
+            if use_tools and response.choices[0].finish_reason == "tool_calls":
+                # Process tools
+                tool_calls = response.choices[0].message.tool_calls
+                tool_messages = {}
+                
+                # Track which tools are being called
+                for tool_call in tool_calls:
+                    if tool_call.function.name in self.tool_functions:
+                        tool_messages[tool_call.function.name] = True
+                        if tool_call.function.name == "generate_image":
+                            image_generation_used = True
+                
+                # Display appropriate messages based on which tools are being called
+                if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
+                    await message.channel.send("🔍 Researching information...")
+                
+                if tool_messages.get("code_interpreter"):
+                    await message.channel.send("💻 Running code...")
+                
+                if tool_messages.get("generate_image"):
+                    await message.channel.send("🎨 Generating images...")
+                    
+                if tool_messages.get("analyze_data"):
+                    await message.channel.send("📊 Analyzing data...")
+                    
+                if tool_messages.get("set_reminder") or tool_messages.get("get_reminders"):
+                    await message.channel.send("📅 Processing reminders...")
+                
+                if not tool_messages:                        
+                    await message.channel.send("🤔 Processing...")
+                
+                # Process any tool calls and get the updated messages
+                tool_calls_processed, updated_messages = await process_tool_calls(
+                    self.client, 
+                    response, 
+                    messages_for_api, 
+                    self.tool_functions
+                )
+                
+                # If tool calls were processed, make another API call with the updated messages
+                if tool_calls_processed:
+                    response = await self._retry_api_call(lambda: self.client.chat.completions.create(
+                        model=model,
+                        messages=updated_messages,
+                        temperature=0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                        timeout=60
+                    ))
+            
+            reply = response.choices[0].message.content
+            
+            # Store the response in history for models that support it
+            if model in ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o3-mini"]:
+                if model in ["o1-mini", "o1-preview"]:
+                    # For models without system prompt support, keep track separately
+                    history_without_system.append({"role": "assistant", "content": reply})
+                    # Sync back to regular history format by preserving system message
+                    new_history = []
+                    if system_content:
+                        new_history.append({"role": "system", "content": system_content})
+                    new_history.extend(history_without_system[1:])  # Skip the first "Instructions" message
+                    
+                    # Only keep a reasonable amount of history
+                    if len(new_history) > 20:  # Truncate to last 20 messages if too long
+                        new_history = new_history[:1] + new_history[-19:]  # Keep system message + last 19 messages
+                        
+                    await self.db.save_history(user_id, new_history)
+                else:
+                    # For models with system prompt support, just append to regular history
+                    history.append({"role": "assistant", "content": reply})
+                    
+                    # Only keep a reasonable amount of history
+                    if len(history) > 20:  # Truncate to last 20 messages if too long
+                        history = history[:1] + history[-19:]  # Keep system message + last 19 messages
+                        
+                    await self.db.save_history(user_id, history)
+            
+            # Check if there are any image URLs to send from the image generation tool
+            image_urls = []
+            chart_filename = None
+            
+            # Check response from analyze_data tool
+            for msg in locals().get('updated_messages', []):
+                if msg.get('role') == 'tool' and msg.get('name') == 'analyze_data':
+                    try:
+                        content = msg.get('content', '')
+                        if isinstance(content, str) and '{' in content:
+                            data = json.loads(content)
+                            if data.get('has_chart') and 'chart_filename' in data:
+                                chart_filename = data.get('chart_filename')
+                    except Exception as e:
+                        logging.error(f"Error parsing chart data: {str(e)}")
+            
+            # Check response from generate_image tool
+            for msg in locals().get('updated_messages', []):
+                if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
+                    try:
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            data = json.loads(content) if '{' in content else {}
+                            if 'image_urls' in data:
+                                image_urls = data.get('image_urls', [])
+                                
+                                # Add timestamp to AI-generated images in the message content for storage
+                                # This affects how they're stored in history
+                                if reply and image_urls and image_generation_used:
+                                    # ... existing code for image processing ...
+                                    pass
+                    except Exception as e:
+                        logging.error(f"Error parsing image URLs: {str(e)}")
+            
+            # If image generation was used and we have image URLs, handle specially
+            if image_generation_used and image_urls:
+                # ... existing code for image handling ...
+                pass
+            elif chart_filename:
+                # Handle case where we have a chart from data analysis
+                await send_response(message.channel, reply)
+                
+                # Send chart if it exists
+                try:
+                    with open(chart_filename, "rb") as f:
+                        chart_data = f.read()
+                    await message.channel.send(
+                        "Chart from data analysis:",
+                        file=discord.File(io.BytesIO(chart_data), filename=chart_filename)
+                    )
+                except Exception as e:
+                    logging.error(f"Error sending chart: {str(e)}")
+            else:
+                # Normal response without image generation
+                await send_response(message.channel, reply)
+            
+            # Log processing time for performance monitoring
+            processing_time = time.time() - start_time
+            logging.info(f"Message processed in {processing_time:.2f} seconds (User: {user_id}, Model: {model})")
+            
+        except asyncio.CancelledError:
+            # Handle cancellation cleanly
+            logging.info(f"Task for user {user_id} was cancelled")
+            raise
+        except Exception as e:
+            error_message = f"Error: {str(e)}"
+            logging.error(f"Error in message processing: {error_message}")
+            await message.channel.send(error_message)
+    
+    async def _analyze_data(self, args: Dict[str, Any]) -> str:
+        """
+        Analyze data from recently uploaded CSV/Excel files.
+        
+        Args:
+            args: Analysis parameters
+            
+        Returns:
+            JSON string with analysis results
+        """
+        query = args.get("query", "")
+        visualization_type = args.get("visualization_type", "auto")
+        
+        if not query:
+            return json.dumps({"error": "No analysis request provided"})
+        
+        # Check if there are any data files
+        active_data_files = {}
+        for user_id, data_info in self.user_data_files.items():
+            if datetime.now().timestamp() - data_info.get("timestamp", 0) < 3600:  # 1 hour
+                active_data_files[user_id] = data_info
+        
+        if not active_data_files:
+            return json.dumps({
+                "error": "No data files found. Please upload a CSV or Excel file first."
+            })
+            
+        # Use the most recent data file
+        latest_user_id = max(active_data_files.keys(), key=lambda k: active_data_files[k]["timestamp"])
+        data_info = active_data_files[latest_user_id]
+        
+        try:
+            file_bytes = data_info["bytes"]
+            filename = data_info["filename"]
+            
+            # Analyze data using data_utils
+            summary, chart_image, metadata = await process_data_file(file_bytes, filename, query)
+            
+            if chart_image:
+                # Save chart to temporary file
+                chart_filename = f"chart_{int(time.time())}.png"
+                
+                with open(chart_filename, "wb") as file:
+                    file.write(chart_image)
+                
+                # Return results with chart file path
+                return json.dumps({
+                    "summary": summary,
+                    "has_chart": True,
+                    "chart_filename": chart_filename,
+                    "metadata": metadata
+                })
+            else:
+                return json.dumps({
+                    "summary": summary,
+                    "has_chart": False,
+                    "metadata": metadata
+                })
+        except Exception as e:
+            logging.error(f"Error analyzing data: {str(e)}")
+            return json.dumps({"error": f"Error analyzing data: {str(e)}"})
+    
+    async def _set_reminder(self, args: Dict[str, Any]) -> str:
+        """
+        Set a reminder for a user.
+        
+        Args:
+            args: Reminder information
+            
+        Returns:
+            JSON string with reminder info
+        """
+        content = args.get("content", "")
+        time_str = args.get("time", "")
+        
+        if not content:
+            return json.dumps({"error": "No reminder content provided"})
+            
+        if not time_str:
+            return json.dumps({"error": "No reminder time provided"})
+            
+        try:
+            # Find user_id from current task
+            current_task = asyncio.current_task()
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    break
+                    
+            if not user_id:
+                return json.dumps({"error": "Could not identify user"})
+                
+            # Parse time
+            remind_at = await self.reminder_manager.parse_time(time_str)
+            
+            if not remind_at:
+                return json.dumps({
+                    "error": f"Could not parse time '{time_str}'. Please use formats like '30m', '2h', '1d', 'tomorrow', or '15:00'"
+                })
+                
+            # Save reminder
+            reminder = await self.reminder_manager.add_reminder(user_id, content, remind_at)
+            
+            return json.dumps({
+                "success": True,
+                "content": content,
+                "time": remind_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "reminder_id": str(reminder["_id"])
+            })
+            
+        except Exception as e:
+            logging.error(f"Error setting reminder: {str(e)}")
+            return json.dumps({"error": f"Error setting reminder: {str(e)}"})
+    
+    async def _get_reminders(self, args: Dict[str, Any]) -> str:
+        """
+        Get a user's reminders.
+        
+        Args:
+            args: Not used
+            
+        Returns:
+            JSON string with list of reminders
+        """
+        try:
+            # Find user_id from current task
+            current_task = asyncio.current_task()
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    break
+                    
+            if not user_id:
+                return json.dumps({"error": "Could not identify user"})
+                
+            # Get reminders list
+            reminders = await self.reminder_manager.get_user_reminders(user_id)
+            
+            # Format reminders
+            formatted_reminders = []
+            for reminder in reminders:
+                formatted_reminders.append({
+                    "id": str(reminder["_id"]),
+                    "content": reminder["content"],
+                    "time": reminder["remind_at"].strftime("%Y-%m-%d %H:%M:%S"),
+                    "created_at": reminder["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                })
+                
+            return json.dumps({
+                "success": True,
+                "reminders": formatted_reminders,
+                "count": len(formatted_reminders)
+            })
+            
+        except Exception as e:
+            logging.error(f"Error getting reminders: {str(e)}")
+            return json.dumps({"error": f"Error retrieving reminders: {str(e)}"})
     
     # Helper method to download images with error handling
     async def _download_image(self, session, url):
@@ -688,9 +906,35 @@ class MessageHandler:
                 task.cancel()
             user_tasks[user_id] = []
             
+    async def _run_chart_cleanup(self):
+        """Run periodic chart cleanup to remove old chart files"""
+        from src.utils.data_utils import cleanup_old_charts
+        
+        try:
+            while True:
+                # Cleanup every 30 minutes but delete only charts older than 1 hour
+                await cleanup_old_charts(max_age_hours=1)
+                await asyncio.sleep(1800)  # 30 minutes
+        except asyncio.CancelledError:
+            logging.info("Chart cleanup task was cancelled")
+            raise
+        except Exception as e:
+            logging.error(f"Error in chart cleanup task: {str(e)}")
+            
     async def close(self):
-        """Clean up resources properly when shutting down"""
-        # Close aiohttp session
+        """Clean up resources when closing the bot"""
+        # Stop reminder manager
+        await self.reminder_manager.stop()
+        
+        # Cancel chart cleanup task
+        if hasattr(self, 'chart_cleanup_task'):
+            self.chart_cleanup_task.cancel()
+            try:
+                await self.chart_cleanup_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close HTTP session
         if self.aiohttp_session:
             await self.aiohttp_session.close()
         

@@ -1,27 +1,34 @@
-from typing import List, Dict, Any, Optional, Tuple
-import tiktoken
 import json
-from openai import AsyncOpenAI
+import logging
+import asyncio
+from typing import List, Dict, Any, Tuple, Optional, Callable
 
-def get_tools_for_model():
-    """Returns the tools configuration for OpenAI API."""
-    tools = [
+def get_tools_for_model() -> List[Dict[str, Any]]:
+    """
+    Returns the list of tools available to the model.
+    
+    Returns:
+        List of tool objects
+    """
+    return [
         {
             "type": "function",
             "function": {
                 "name": "google_search",
-                "description": "Search Google for up-to-date information on a topic.",
+                "description": "Search the web for current information. Use this when you need to answer questions about current events or recent information.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "The search query to look up"
+                            "description": "The search query"
                         },
                         "num_results": {
                             "type": "integer",
-                            "description": "The number of results to return (default: 3)",
-                            "default": 3
+                            "description": "The number of search results to return (1-10)",
+                            "default": 3,
+                            "minimum": 1,
+                            "maximum": 10
                         }
                     },
                     "required": ["query"]
@@ -32,7 +39,7 @@ def get_tools_for_model():
             "type": "function",
             "function": {
                 "name": "scrape_webpage",
-                "description": "Scrape and extract text content from a webpage URL.",
+                "description": "Scrape and extract content from a webpage. Use this to get the content of a specific webpage.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -49,7 +56,7 @@ def get_tools_for_model():
             "type": "function",
             "function": {
                 "name": "code_interpreter",
-                "description": "Execute code in Python or C++ and return the output.",
+                "description": "Run code in Python or other supported languages. Use this to execute code, perform calculations, generate plots, and analyze data.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -59,15 +66,16 @@ def get_tools_for_model():
                         },
                         "language": {
                             "type": "string",
-                            "description": "The programming language to use (python or cpp)",
-                            "enum": ["python", "cpp"]
+                            "description": "The programming language (default: python)",
+                            "default": "python",
+                            "enum": ["python", "javascript", "bash", "c++"]
                         },
                         "input": {
                             "type": "string",
-                            "description": "Optional input data for the program (for cin>>, input() functions). All inputs should be on a single line, separated by spaces",
+                            "description": "Optional input data for the code"
                         }
                     },
-                    "required": ["code", "language"]
+                    "required": ["code"]
                 }
             }
         },
@@ -75,76 +83,159 @@ def get_tools_for_model():
             "type": "function",
             "function": {
                 "name": "generate_image",
-                "description": "Generate images from a text prompt using AI.",
+                "description": "Generate images based on text prompts. Use this when the user asks for an image to be created.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "Detailed description of the image you want to generate"
+                            "description": "The prompt describing the image to generate"
                         },
                         "num_images": {
                             "type": "integer",
-                            "description": "Number of images to generate (default: 1, max: 4)",
-                            "default": 1
+                            "description": "The number of images to generate (1-4)",
+                            "default": 1,
+                            "minimum": 1,
+                            "maximum": 4
                         }
                     },
                     "required": ["prompt"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "analyze_data",
+                "description": "Analyze data files (CSV, Excel) and create visualizations. Use this when users need to analyze data, create charts, or extract insights from their data files.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The query describing what analysis to perform on the data, including what type of chart to create (e.g. 'Create a histogram of ages', 'Show a pie chart of categories', 'Calculate average by group')"
+                        },
+                        "visualization_type": {
+                            "type": "string",
+                            "description": "The type of visualization to create",
+                            "enum": ["bar", "line", "pie", "scatter", "histogram", "auto"],
+                            "default": "auto"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "set_reminder",
+                "description": "Set a reminder for the user. Use this when a user wants to be reminded about something at a specific time.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "The content of the reminder"
+                        },
+                        "time": {
+                            "type": "string",
+                            "description": "The time for the reminder. Can be relative (e.g., '30m', '2h', '1d') or specific times ('tomorrow', '3:00pm', etc.)"
+                        }
+                    },
+                    "required": ["content", "time"]
+                }
+            }
+        },
+        {
+            "type": "function", 
+            "function": {
+                "name": "get_reminders",
+                "description": "Get a list of upcoming reminders for the user. Use this when user asks about their reminders.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
         }
     ]
-    return tools
 
-async def process_tool_calls(client, model_response, messages_history, tool_functions):
-    """Process tool calls returned by the model and add results to message history."""
-    if (model_response.choices[0].finish_reason == "tool_calls" and 
-        hasattr(model_response.choices[0].message, 'tool_calls')):
-        # Add model's message with tool calls to history
-        model_message = {"role": "assistant", "content": model_response.choices[0].message.content, "tool_calls": []}
-        
-        for tool_call in model_response.choices[0].message.tool_calls:
-            model_message["tool_calls"].append({
-                "id": tool_call.id,
-                "type": tool_call.type,
-                "function": {
-                    "name": tool_call.function.name,
-                    "arguments": tool_call.function.arguments
-                }
-            })
-        
-        messages_history.append(model_message)
-        
-        # Process each tool call
-        for tool_call in model_response.choices[0].message.tool_calls:
-            if tool_call.type == "function":
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
-                
-                # Execute the function if it exists
-                if function_name in tool_functions:
-                    try:
-                        function_response = await tool_functions[function_name](function_args)
-                        
-                        # Add function response to messages
-                        messages_history.append({
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": str(function_response)
-                        })
-                    except Exception as e:
-                        # Add error message if function execution failed
-                        messages_history.append({
-                            "tool_call_id": tool_call.id,
-                            "role": "tool",
-                            "name": function_name,
-                            "content": f"Error executing function: {str(e)}"
-                        })
-        
-        return True, messages_history
+async def process_tool_calls(client, response, messages, tool_functions) -> Tuple[bool, List[Dict[str, Any]]]:
+    """
+    Process and execute tool calls from the OpenAI API response.
     
-    return False, messages_history
+    Args:
+        client: OpenAI client
+        response: API response containing tool calls
+        messages: The current chat messages
+        tool_functions: Dictionary mapping tool names to handler functions
+        
+    Returns:
+        Tuple containing (processed_any_tools, updated_messages)
+    """
+    processed_any = False
+    tool_calls = response.choices[0].message.tool_calls
+    
+    # Create a copy of the messages to update
+    updated_messages = messages.copy()
+    
+    # Add the assistant message with the tool calls
+    updated_messages.append({
+        "role": "assistant",
+        "content": response.choices[0].message.content,
+        "tool_calls": [
+            {
+                "id": tc.id,
+                "type": tc.type,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments
+                }
+            } for tc in tool_calls
+        ] if tool_calls else None
+    })
+    
+    # Process each tool call
+    for tool_call in tool_calls:
+        function_name = tool_call.function.name
+        if function_name in tool_functions:
+            # Parse the JSON arguments
+            try:
+                function_args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError:
+                logging.error(f"Invalid JSON in tool call arguments: {tool_call.function.arguments}")
+                function_args = {}
+                
+            # Call the appropriate function
+            try:
+                function_response = await tool_functions[function_name](function_args)
+                
+                # Add the tool output back to messages
+                updated_messages.append({
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": str(function_response)
+                })
+                
+                processed_any = True
+                
+            except Exception as e:
+                error_message = f"Error executing {function_name}: {str(e)}"
+                logging.error(error_message)
+                
+                # Add the error as tool output
+                updated_messages.append({
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": error_message
+                })
+                
+                processed_any = True
+
+    return processed_any, updated_messages
 
 def count_tokens(text: str) -> int:
     """Estimate token count using a simple approximation."""
@@ -154,7 +245,7 @@ def count_tokens(text: str) -> int:
 def trim_content_to_token_limit(content: str, max_tokens: int = 8096) -> str:
     """Trim content to stay within token limit while preserving the most recent content."""
     current_tokens = count_tokens(content)
-    if (current_tokens <= max_tokens):
+    if current_tokens <= max_tokens:
         return content
         
     # Split into lines and start removing from the beginning until under limit
@@ -170,77 +261,38 @@ def trim_content_to_token_limit(content: str, max_tokens: int = 8096) -> str:
         
     return '\n'.join(lines)
 
-def prepare_messages_for_api(messages, max_tokens=8096):
-    """Prepare messages for API while ensuring token limit and no null content."""
-    if not messages:
-        from src.config.config import NORMAL_CHAT_PROMPT
-        return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
+def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Prepare message history for the OpenAI API.
+    
+    Args:
+        messages: List of message objects
         
-    total_tokens = 0
+    Returns:
+        Prepared messages for API
+    """
     prepared_messages = []
     
-    # Process messages in reverse order to keep the most recent ones
-    for msg in reversed(messages):
-        # Ensure message has valid role and content
-        if not msg or not isinstance(msg, dict):
-            continue
-            
-        role = msg.get('role')
-        content = msg.get('content')
+    for msg in messages:
+        # Create a copy of the message to avoid modifying the original
+        processed_msg = dict(msg)
         
-        if not role or content is None:
-            continue
+        # Handle image URLs with timestamps in content
+        if isinstance(processed_msg.get('content'), list):
+            # Filter out images that have a timestamp (they're already handled specially)
+            new_content = []
+            for item in processed_msg['content']:
+                if item.get('type') == 'image_url' and 'timestamp' in item:
+                    # Remove timestamp from API calls
+                    new_item = dict(item)
+                    if 'timestamp' in new_item:
+                        del new_item['timestamp']
+                    new_content.append(new_item)
+                else:
+                    new_content.append(item)
             
-        # Convert complex content to text for token counting
-        if isinstance(content, list):
-            text_content = ""
-            for item in content:
-                if not item or not isinstance(item, dict):
-                    continue
-                    
-                item_type = item.get('type')
-                if item_type == 'text' and item.get('text'):
-                    text_content += item.get('text', "") + "\n"
-            
-            # Skip if there's no actual text content
-            if not text_content:
-                continue
-                
-            msg_tokens = count_tokens(text_content)
-            if total_tokens + msg_tokens > max_tokens:
-                # Trim the content
-                trimmed_text = trim_content_to_token_limit(text_content, max_tokens - total_tokens)
-                if trimmed_text:
-                    new_content = [{"type": "text", "text": trimmed_text}]
-                    # Preserve any image URLs from the original content
-                    for item in content:
-                        if isinstance(item, dict) and item.get('type') == 'image_url' and item.get('image_url'):
-                            new_content.append(item)
-                    prepared_messages.insert(0, {"role": role, "content": new_content})
-                break
-            else:
-                prepared_messages.insert(0, msg)
-                total_tokens += msg_tokens
-        else:
-            # Handle string content
-            msg_content_str = str(content) if content is not None else ""
-            if not msg_content_str:  # Skip empty content
-                continue
-                
-            msg_tokens = count_tokens(msg_content_str)
-            if total_tokens + msg_tokens > max_tokens:
-                # Trim the content
-                trimmed_text = trim_content_to_token_limit(msg_content_str, max_tokens - total_tokens)
-                if trimmed_text:
-                    prepared_messages.insert(0, {"role": role, "content": trimmed_text})
-                break
-            else:
-                prepared_messages.insert(0, {"role": role, "content": msg_content_str})
-                total_tokens += msg_tokens
-    
-    # Ensure we have at least one message with valid content
-    if not prepared_messages:
-        from src.config.config import NORMAL_CHAT_PROMPT
-        return [{"role": "system", "content": NORMAL_CHAT_PROMPT}]
-                
+            processed_msg['content'] = new_content
+        
+        prepared_messages.append(processed_msg)
+        
     return prepared_messages

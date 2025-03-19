@@ -10,3 +10,8 @@ aiohttp>=3.9.0
 runware>=0.2.0
 python-dotenv>=1.0.0
 webdriver-manager
+matplotlib
+pandas
+openpyxl
+pytz
+xlrd
