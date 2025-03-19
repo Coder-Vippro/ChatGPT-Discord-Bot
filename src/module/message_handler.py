@@ -5,7 +5,7 @@ import logging
 import time
 import functools
 import concurrent.futures
-from typing import Dict, Any
+from typing import Dict, Any, List
 import io
 import aiohttp
 from datetime import datetime
@@ -18,6 +18,15 @@ user_tasks = {}
 user_last_request = {}
 RATE_LIMIT_WINDOW = 5  # seconds
 MAX_REQUESTS = 3  # max requests per window
+
+# File extensions that should be treated as text files
+TEXT_FILE_EXTENSIONS = [
+    '.txt', '.md', '.csv', '.json', '.xml', '.html', '.htm', '.css', 
+    '.js', '.py', '.java', '.c', '.cpp', '.h', '.hpp', '.cs', '.php',
+    '.rb', '.pl', '.sh', '.bat', '.ps1', '.sql', '.yaml', '.yml',
+    '.ini', '.cfg', '.conf', '.log', '.ts', '.jsx', '.tsx', '.vue', 
+    '.go', '.rs', '.swift', '.kt', '.kts', '.dart', '.lua'
+]
 
 class MessageHandler:
     def __init__(self, bot, db_handler, openai_client, image_generator):
@@ -215,6 +224,7 @@ class MessageHandler:
                             
                 # Handle normal messages and non-PDF attachments
                 content = []
+                extracted_text_contents = []
                 
                 # Add message content if present
                 if message.content:
@@ -223,17 +233,51 @@ class MessageHandler:
                 # Process attachments
                 if message.attachments:
                     for attachment in message.attachments:
-                        if any(attachment.filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                        if any(attachment.filename.lower().endswith(ext) for ext in TEXT_FILE_EXTENSIONS):
+                            # Process text-based file attachments
+                            try:
+                                file_bytes = await attachment.read()
+                                try:
+                                    # Try to decode as UTF-8 first
+                                    file_content = file_bytes.decode('utf-8')
+                                except UnicodeDecodeError:
+                                    # Fallback to other common encodings
+                                    try:
+                                        file_content = file_bytes.decode('latin-1')
+                                    except:
+                                        file_content = file_bytes.decode('utf-8', errors='replace')
+                                
+                                # Add formatted text to extracted contents
+                                extracted_text = f"\n\n--- Content of {attachment.filename} ---\n{file_content}\n--- End of {attachment.filename} ---\n\n"
+                                extracted_text_contents.append(extracted_text)
+                                
+                                # Add a reference in the content
+                                content.append({"type": "text", "text": f"[Attached file: {attachment.filename}]"})
+                                
+                                logging.info(f"Extracted text from {attachment.filename} ({len(file_content)} chars)")
+                                
+                            except Exception as e:
+                                error_msg = f"Error processing text file {attachment.filename}: {str(e)}"
+                                logging.error(error_msg)
+                                content.append({"type": "text", "text": f"[Error processing {attachment.filename}: {str(e)}]"})
+                                
+                        elif any(attachment.filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
                             content.append({
                                 "type": "image_url", 
                                 "image_url": {
                                     "url": attachment.url,
-                                    "detail": "auto"
+                                    "detail": "high"
                                 },
                                 "timestamp": datetime.now().isoformat()  # Add timestamp to track image expiration
                             })
                         else:
                             content.append({"type": "text", "text": f"[Attachment: {attachment.filename}] - I can't process this type of file directly."})
+                
+                # If we have extracted text contents, append them to the user's message
+                if extracted_text_contents:
+                    # Add the file content(s) after the user's message
+                    for text in extracted_text_contents:
+                        content.append({"type": "text", "text": text})
                 
                 if not content:
                     content.append({"type": "text", "text": "No content."})
