@@ -55,11 +55,15 @@ class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
             
             # Extract database name from URI for later use
             self.db_name = self._extract_db_name_from_uri(self.mongodb_uri)
-        
-    async def tearDown(self):
+    
+    async def asyncSetUp(self):
+        # No additional async setup needed, but required by IsolatedAsyncioTestCase
+        pass
+    
+    async def asyncTearDown(self):
         if not self.using_real_db:
             self.mock_client_patcher.stop()
-        if self.using_real_db:
+        else:
             # Clean up test data if using real database
             await self.cleanup_test_data()
     
@@ -215,6 +219,7 @@ class TestOpenAIUtils(unittest.TestCase):
         # Test empty messages
         empty_result = prepare_messages_for_api([])
         self.assertEqual(len(empty_result), 1)  # Should have system message
+        self.assertEqual(empty_result[0]["role"], "system")  # Verify it's a system message
         
         # Test regular messages
         messages = [
@@ -223,7 +228,7 @@ class TestOpenAIUtils(unittest.TestCase):
             {"role": "user", "content": "How are you?"}
         ]
         result = prepare_messages_for_api(messages)
-        self.assertEqual(len(result), 3)
+        self.assertEqual(len(result), 4)  # Should have system message + 3 original messages
         
         # Test with null content
         messages_with_null = [
@@ -231,8 +236,11 @@ class TestOpenAIUtils(unittest.TestCase):
             {"role": "assistant", "content": "Response"}
         ]
         result_fixed = prepare_messages_for_api(messages_with_null)
-        self.assertEqual(len(result_fixed), 1)  # Should exclude the null content
-
+        self.assertEqual(len(result_fixed), 2)  # Should have system message + 1 valid message
+        # Verify the content is correct (system message + only the assistant message)
+        self.assertEqual(result_fixed[0]["role"], "system")
+        self.assertEqual(result_fixed[1]["role"], "assistant")
+        self.assertEqual(result_fixed[1]["content"], "Response")
 
 class TestCodeUtils(unittest.TestCase):
     """Test code utility functions"""
@@ -339,7 +347,7 @@ print("Hello world")
 #        self.assertIn("Test Heading", content)
 #        self.assertIn("Test paragraph", content)
         
-class TestPDFUtils(unittest.TestCase):
+class TestPDFUtils(unittest.IsolatedAsyncioTestCase):
     """Test PDF utilities"""
     
     async def test_send_response(self):

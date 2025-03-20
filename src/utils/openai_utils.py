@@ -273,7 +273,21 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     """
     prepared_messages = []
     
+    # Check if there's a system message already
+    has_system_message = any(msg.get('role') == 'system' for msg in messages)
+    
+    # If no system message exists, add a default one
+    if not has_system_message:
+        prepared_messages.append({
+            "role": "system",
+            "content": "You are a helpful AI assistant that can answer questions, provide information, and assist with various tasks."
+        })
+    
     for msg in messages:
+        # Skip messages with None content
+        if msg.get('content') is None:
+            continue
+            
         # Create a copy of the message to avoid modifying the original
         processed_msg = dict(msg)
         
