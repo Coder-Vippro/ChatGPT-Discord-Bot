@@ -1,19 +1,31 @@
-# Build stage with all build dependencies
-FROM python:3.12.3-alpine AS builder
+# Builder stage optimized for tiktoken and other dependencies
+FROM python:3.13.2-alpine AS builder
 
-# Set environment variables
+# Set environment variables for more efficient builds
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    MAKEFLAGS="-j$(nproc)" \
+    PATH="/root/.local/bin:$PATH" \
+    RUSTFLAGS="-C target-feature=-crt-static" \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-# Install build dependencies (only what's absolutely needed)
+# Create non-root user for better security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+# Install build dependencies with cleanup in the same layer
 RUN apk add --no-cache \
     gcc \
     musl-dev \
     python3-dev \
     cargo \
+    rust \
     libffi-dev \
-    g++
+    g++ \
+    openssl-dev \
+    git \
+    && rustup update \
+    && rustup default stable
 
 # Set the working directory
 WORKDIR /app
@@ -21,34 +33,45 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python packages to a local directory
-RUN pip install --user --no-cache-dir -r requirements.txt
+# Split requirements install for better caching
+# Install tiktoken separately first (the slow one)
+RUN pip install --user --no-cache-dir tiktoken
 
-# Runtime stage with minimal dependencies
-FROM python:3.12.3-alpine
+# Install other requirements
+RUN pip install --user --no-cache-dir -r requirements.txt \
+    && find /root/.local -name "__pycache__" -type d -exec rm -rf {} +
+
+# Runtime stage with absolute minimal dependencies
+FROM python:3.13.2-alpine AS runtime
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PATH="/home/appuser/.local/bin:$PATH"
 
-# Add needed runtime dependencies (if any)
-RUN apk add --no-cache \ 
+# Create same non-root user as in builder
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+    && mkdir -p /home/appuser/app/logs /home/appuser/app/temp_charts \
+    && chown -R appuser:appgroup /home/appuser
+
+# Add only the necessary runtime dependencies
+RUN apk add --no-cache \
     libstdc++ \
     g++
 
 # Set the working directory
-WORKDIR /usr/src/discordbot
+WORKDIR /home/appuser/app
 
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Copy Python packages from builder stage (only what's needed)
+COPY --from=builder --chown=appuser:appgroup /root/.local /home/appuser/.local
 
-# Copy only the application source code needed to run
-COPY bot.py .
-COPY src/ ./src/
+# Copy only the needed application files
+COPY --chown=appuser:appgroup bot.py .
+COPY --chown=appuser:appgroup src/ ./src/
+COPY --chown=appuser:appgroup plugins/ ./plugins/
 
-# Create directories for logs and temp files
-RUN mkdir -p logs temp_charts
+# Use non-root user
+USER appuser
 
 # Command to run the application
 CMD ["python3", "bot.py"]

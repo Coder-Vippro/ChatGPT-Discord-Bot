@@ -7,25 +7,25 @@ on:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   tests:
     runs-on: ubuntu-latest
     env:
       MONGODB_URI: ${{ secrets.MONGODB_URI }}
-    environment: Private Server Deploy 
+    environment: Private Server Deploy
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for better versioning
+          fetch-depth: 0  
 
       - name: Set up Python
         uses: actions/setup-python@v5.3.0
         with:
-          python-version: '3.12.3'
-          cache: 'pip'  # Use built-in pip caching
+          python-version: '3.13.2'
+          cache: 'pip' 
 
       - name: Install dependencies
         run: |
@@ -35,9 +35,7 @@ jobs:
 
       - name: Lint code
         run: |
-          # Stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Exit-zero treats all errors as warnings
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Run unit tests with coverage
@@ -51,7 +49,7 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
-    environment: Private Server Deploy 
+    environment: Private Server Deploy
     needs: tests
     outputs:
       image: ghcr.io/coder-vippro/chatgpt-discord-bot
@@ -63,7 +61,6 @@ jobs:
       - name: Generate version number
         id: version
         run: |
-          # Create a version with timestamp and short commit hash
           VERSION=$(date +'%Y%m%d%H%M')-${GITHUB_SHA::7}
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
@@ -82,12 +79,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      
       - name: Build and push multi-arch Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          # Multi-arch platforms
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/coder-vippro/chatgpt-discord-bot:latest
@@ -102,12 +100,26 @@ jobs:
           cache-from: type=gha,scope=docker-build-cache
           cache-to: type=gha,mode=max,scope=docker-build-cache
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # Add compression and output configuration for smaller images
-          outputs: type=image,compression=zstd,compression-level=19,force-compression=true
+          outputs: type=image,compression=zstd,compression-level=22,force-compression=true
+          # Build args
           build-args: |
             BUILD_DATE=${{ github.event.repository.updated_at }}
             VCS_REF=${{ github.sha }}
             VERSION=${{ steps.version.outputs.version }}
+            BUILDKIT_INLINE_CACHE=1
+            DOCKER_BUILDKIT=1
+
+      - name: Prune Builder Cache
+        if: always()
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          target: builder
+          platforms: linux/amd64
+          cache-from: type=gha,scope=docker-build-cache
+          cache-to: type=gha,mode=min,scope=docker-build-cache
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-notification:
     runs-on: ubuntu-latest
@@ -125,5 +137,3 @@ jobs:
             Repository: ${{ github.repository }}
           color: 0x00ff00
           username: GitHub Actions
-
-

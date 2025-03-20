@@ -56,7 +56,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "code_interpreter",
-                "description": "Run code in Python or other supported languages. Use this to execute code, perform calculations, generate plots, and analyze data.",
+                "description": "Run code in Python and C++. Use this to execute code, perform calculations. This can run only with default Python and C++ libraries.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -68,7 +68,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                             "type": "string",
                             "description": "The programming language (default: python)",
                             "default": "python",
-                            "enum": ["python", "javascript", "bash", "c++"]
+                            "enum": ["python", "c++"]
                         },
                         "input": {
                             "type": "string",
@@ -113,7 +113,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "The query describing what analysis to perform on the data, including what type of chart to create (e.g. 'Create a histogram of ages', 'Show a pie chart of categories', 'Calculate average by group')"
+                            "description": "The query describing what analysis to perform on the data, including what type of chart to create (e.g. 'Create a histogram of ages', 'Show a pie chart of categories', 'Calculate average by group'), translate all user request to english before process",
                         },
                         "visualization_type": {
                             "type": "string",

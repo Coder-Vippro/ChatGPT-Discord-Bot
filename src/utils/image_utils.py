@@ -3,6 +3,8 @@ import aiohttp
 import logging
 from typing import List, Dict, Any, Optional
 from runware import IImageInference
+import os
+import time
 
 class ImageGenerator:
     def __init__(self, api_key: str):
@@ -14,63 +16,82 @@ class ImageGenerator:
         """
         from runware import Runware
         self.runware = Runware(api_key=api_key)
+        self.connected = False
+    
+    async def ensure_connected(self):
+        """Ensure connection to Runware API is established"""
+        if not self.connected:
+            await self.runware.connect()
+            self.connected = True
         
-    async def generate_image(self, prompt: str, num_images: int = 1) -> Dict[str, Any]:
+    async def generate_image(self, prompt: str, num_images: int = 1, negative_prompt: str = "blurry, distorted, low quality"):
         """
-        Generate images using AI from a text prompt.
+        Generate images based on a text prompt
         
         Args:
-            prompt (str): The text prompt describing the image to generate
-            num_images (int): Number of images to generate (default: 1, max: 4)
-        
-        Returns:
-            dict: Dictionary containing URLs and binary data of generated images
-        """
-        try:
-            # Limit the number of images to maximum 4
-            num_images = min(max(1, num_images), 4)
+            prompt: The text prompt for image generation
+            num_images: Number of images to generate (max 4)
+            negative_prompt: Things to avoid in the generated image
             
-            # Create an image generation request
+        Returns:
+            Dict with generated images or error information
+        """
+        num_images = min(num_images, 4)
+        
+        try:
+            # Ensure connection is established
+            await self.ensure_connected()
+            
+            # Configure request for Runware
             request_image = IImageInference(
                 positivePrompt=prompt,
-                model="runware:100@1",
                 numberResults=num_images,
+                model="runware:5@1",  # Specify the model
+                negativePrompt=negative_prompt,
                 height=512,
-                width=512
+                width=512,
             )
             
-            # Call the API to get the results
+            # Generate images
             images = await self.runware.imageInference(requestImage=request_image)
             
-            # Check the API's return value
-            if images is None:
-                return {"success": False, "error": "Image generation failed - API returned no results"}
-            
-            # Format the results with URLs
             result = {
                 "success": True,
                 "prompt": prompt,
-                "image_count": len(images),
-                "image_urls": [image.imageURL for image in images],
-                "binary_images": []
+                "binary_images": [],
+                "image_count": 0
             }
             
-            # Download images for sending as attachments
-            async with aiohttp.ClientSession() as session:
-                for image_url in result["image_urls"]:
+            # Process generated images - handle different response formats
+            if images:
+                # Extract image URLs based on response structure
+                image_urls = []
+                
+                # Case 1: Response is a direct list/iterable of image objects
+                if hasattr(images, '__iter__') and not hasattr(images, 'images'):
+                    for image in images:
+                        if hasattr(image, 'imageURL'):
+                            image_urls.append(image.imageURL)
+                
+                # Case 2: Response has an 'images' attribute with URLs
+                elif hasattr(images, 'images') and images.images:
+                    image_urls = images.images
+                
+                result["image_count"] = len(image_urls)
+                
+                # Get binary data for each image
+                for img_url in image_urls:
                     try:
-                        async with session.get(image_url) as resp:
-                            if resp.status == 200:
-                                image_data = await resp.read()
-                                result["binary_images"].append(image_data)
-                            else:
-                                logging.error(f"Failed to download image: {image_url} with status {resp.status}")
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(img_url) as resp:
+                                if resp.status == 200:
+                                    image_data = await resp.read()
+                                    result["binary_images"].append(image_data)
                     except Exception as e:
-                        logging.error(f"Error downloading image {image_url}: {str(e)}")
+                        logging.error(f"Error downloading image {img_url}: {str(e)}")
             
             return result
-            
+                
         except Exception as e:
-            error_message = f"Error generating images: {str(e)}"
-            logging.error(error_message)
-            return {"success": False, "error": error_message}
+            logging.error(f"Error in generate_image: {str(e)}")
+            return {"success": False, "error": str(e)}

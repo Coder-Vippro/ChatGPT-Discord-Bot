@@ -20,9 +20,10 @@ class DatabaseHandler:
             maxPoolSize=50,
             minPoolSize=10,
             maxIdleTimeMS=45000,
-            connectTimeoutMS=2000,
-            serverSelectionTimeoutMS=3000,
-            waitQueueTimeoutMS=1000,
+            connectTimeoutMS=10000,
+            serverSelectionTimeoutMS=15000,
+            waitQueueTimeoutMS=5000,
+            socketTimeoutMS=30000,
             retryWrites=True
         )
         self.db = self.client['chatgpt_discord_bot']  # Database name
