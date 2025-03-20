@@ -23,9 +23,7 @@ RUN apk add --no-cache \
     libffi-dev \
     g++ \
     openssl-dev \
-    git \
-    && rustup update \
-    && rustup default stable
+    git 
 
 # Set the working directory
 WORKDIR /app
