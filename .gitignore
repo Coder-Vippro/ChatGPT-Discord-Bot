@@ -8,3 +8,6 @@ tests/__pycache__/test_bot.cpython-312.pyc
 chatgpt.zip
 response.txt
 logs
+.venv
+venv
+temp_charts
