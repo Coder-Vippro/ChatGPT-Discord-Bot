@@ -12,7 +12,8 @@ RUN apk add --no-cache \
     musl-dev \
     python3-dev \
     cargo \
-    libffi-dev 
+    libffi-dev \
+    g++
 
 # Set the working directory
 WORKDIR /app
