@@ -47,31 +47,16 @@ jobs:
         with:
           api-key: ${{ secrets.SAFETY_API_KEY }}
 
-  build-and-push:
+  build-amd64:
     runs-on: ubuntu-latest
     environment: Private Server Deploy
     needs: tests
-    outputs:
-      image: ghcr.io/coder-vippro/chatgpt-discord-bot
-      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Generate version number
-        id: version
-        run: |
-          VERSION=$(date +'%Y%m%d%H%M')-${GITHUB_SHA::7}
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
-      - name: Set up QEMU for multi-architecture builds
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-flags: --debug
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -79,35 +64,61 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push multi-arch Docker image
+
+      - name: Build and push Docker image for amd64
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          # Multi-arch platforms
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/coder-vippro/chatgpt-discord-bot:latest
-            ghcr.io/coder-vippro/chatgpt-discord-bot:${{ steps.version.outputs.version }}
-          labels: |
-            org.opencontainers.image.title=ChatGPT-Discord-Bot
-            org.opencontainers.image.description=Discord bot powered by OpenAI ChatGPT
-            org.opencontainers.image.source=https://github.com/coder-vippro/ChatGPT-Discord-Bot
-            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          platforms: linux/amd64
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
           cache-from: type=gha,scope=docker-build-cache
           cache-to: type=gha,mode=max,scope=docker-build-cache
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          outputs: type=image,compression=zstd,compression-level=22,force-compression=true
-          # Build args
-          build-args: |
-            BUILD_DATE=${{ github.event.repository.updated_at }}
-            VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.version.outputs.version }}
-            BUILDKIT_INLINE_CACHE=1
-            DOCKER_BUILDKIT=1
+
+  build-arm64:
+    runs-on: ubuntu-latest
+    environment: Private Server Deploy
+    needs: tests  
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image for arm64
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
+          cache-from: type=gha,scope=docker-build-cache
+          cache-to: type=gha,mode=max,scope=docker-build-cache
+
+  merge-manifest:
+    runs-on: ubuntu-latest
+    needs: [build-amd64, build-arm64]
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create -t ghcr.io/coder-vippro/chatgpt-discord-bot:latest \
+            ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64 \
+            ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
 
   deploy-notification:
     runs-on: ubuntu-latest
