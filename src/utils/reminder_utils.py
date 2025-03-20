@@ -22,9 +22,8 @@ class ReminderManager:
         self.running = False
         self.check_task = None
         
-        # Get system timezone to ensure consistency
-        self.timezone = datetime.now().astimezone().tzinfo
-        logging.info(f"Using server timezone: {self.timezone}")
+        # Log initial timezone info
+        logging.info(f"ReminderManager initialized, using system timezone")
     
     def start(self):
         """Start periodic reminder check"""
@@ -48,12 +47,13 @@ class ReminderManager:
     
     def get_current_time(self) -> datetime:
         """
-        Get the current time with proper timezone
+        Get the current time with proper timezone from the real machine
         
         Returns:
             Current datetime with timezone
         """
-        return datetime.now().replace(tzinfo=self.timezone)
+        # Always get the current time and timezone directly from the system
+        return datetime.now().astimezone()
     
     async def add_reminder(self, user_id: int, content: str, remind_at: datetime) -> Dict[str, Any]:
         """
@@ -81,7 +81,7 @@ class ReminderManager:
             result = await self.db.reminders_collection.insert_one(reminder)
             reminder["_id"] = result.inserted_id
             
-            logging.info(f"Added reminder for user {user_id} at {remind_at} (Server timezone: {self.timezone})")
+            logging.info(f"Added reminder for user {user_id} at {remind_at} (System timezone: {now.tzinfo})")
             return reminder
         except Exception as e:
             logging.error(f"Error adding reminder: {str(e)}")
@@ -182,7 +182,7 @@ class ReminderManager:
                         name="Set on",
                         value=reminder["created_at"].strftime("%Y-%m-%d %H:%M")
                     )
-                    embed.set_footer(text="Server time: " + now.strftime("%Y-%m-%d %H:%M"))
+                    embed.set_footer(text="Current time: " + now.strftime("%Y-%m-%d %H:%M"))
                     
                     # Send reminder message with mention
                     try:
@@ -214,7 +214,7 @@ class ReminderManager:
     
     async def parse_time(self, time_str: str) -> Optional[datetime]:
         """
-        Parse a time string into a datetime object with the server's timezone
+        Parse a time string into a datetime object with the system's timezone
         
         Args:
             time_str: Time string (e.g., "30m", "2h", "1d", "tomorrow", "15:00")
@@ -228,17 +228,17 @@ class ReminderManager:
         try:
             # Handle special keywords
             if time_str == "tomorrow":
-                return now.replace(hour=9, minute=0, second=0) + timedelta(days=1)
+                return now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=1)
             elif time_str == "tonight":
                 # Use 8 PM (20:00) for "tonight"
-                target = now.replace(hour=20, minute=0, second=0)
+                target = now.replace(hour=20, minute=0, second=0, microsecond=0)
                 # If it's already past 8 PM, schedule for tomorrow night
                 if target <= now:
                     target += timedelta(days=1)
                 return target
             elif time_str == "noon":
                 # Use 12 PM for "noon"
-                target = now.replace(hour=12, minute=0, second=0)
+                target = now.replace(hour=12, minute=0, second=0, microsecond=0)
                 # If it's already past noon, schedule for tomorrow
                 if target <= now:
                     target += timedelta(days=1)
@@ -267,13 +267,13 @@ class ReminderManager:
                     return None
                     
                 # Create datetime for the specified time today
-                target = now.replace(hour=hour, minute=minute, second=0)
+                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 
                 # If the time has already passed today, schedule for tomorrow
                 if target <= now:
                     target += timedelta(days=1)
                     
-                logging.info(f"Parsed time '{time_str}' to {target} (Server timezone: {self.timezone})")
+                logging.info(f"Parsed time '{time_str}' to {target} (System timezone: {now.tzinfo})")
                 return target
                 
             return None
