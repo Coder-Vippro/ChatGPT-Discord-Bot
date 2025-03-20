@@ -68,7 +68,6 @@ COPY --from=builder --chown=appuser:appgroup /root/.local /home/appuser/.local
 # Copy only the needed application files
 COPY --chown=appuser:appgroup bot.py .
 COPY --chown=appuser:appgroup src/ ./src/
-COPY --chown=appuser:appgroup plugins/ ./plugins/
 
 # Use non-root user
 USER appuser

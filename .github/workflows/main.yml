@@ -109,18 +109,6 @@ jobs:
             BUILDKIT_INLINE_CACHE=1
             DOCKER_BUILDKIT=1
 
-      - name: Prune Builder Cache
-        if: always()
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          target: builder
-          platforms: linux/amd64
-          cache-from: type=gha,scope=docker-build-cache
-          cache-to: type=gha,mode=min,scope=docker-build-cache
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
   deploy-notification:
     runs-on: ubuntu-latest
     needs: build-and-push
