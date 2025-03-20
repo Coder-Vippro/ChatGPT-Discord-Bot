@@ -68,6 +68,9 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
 
+      - name: Set up QEMU for multi-architecture builds
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -80,12 +83,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image for amd64
+      - name: Build and push multi-arch Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          platforms: linux/amd64, linux/arm64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/coder-vippro/chatgpt-discord-bot:latest
             ghcr.io/coder-vippro/chatgpt-discord-bot:${{ steps.version.outputs.version }}
@@ -99,6 +102,8 @@ jobs:
           cache-from: type=gha,scope=docker-build-cache
           cache-to: type=gha,mode=max,scope=docker-build-cache
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Add compression and output configuration for smaller images
+          outputs: type=image,compression=zstd,compression-level=19,force-compression=true
           build-args: |
             BUILD_DATE=${{ github.event.repository.updated_at }}
             VCS_REF=${{ github.sha }}

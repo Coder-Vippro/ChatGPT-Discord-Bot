@@ -1,5 +1,5 @@
 # Build stage with all build dependencies
-FROM python:3.12.3-slim AS builder
+FROM python:3.12.3-alpine AS builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -7,10 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # Install build dependencies (only what's absolutely needed)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     gcc \
+    musl-dev \
     python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+    cargo \
+    libffi-dev 
 
 # Set the working directory
 WORKDIR /app
@@ -18,27 +20,29 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Install Python packages
+# Install Python packages to a local directory
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 # Runtime stage with minimal dependencies
-FROM python:3.12.3-slim
+FROM python:3.12.3-alpine
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Add needed runtime dependencies (if any)
+RUN apk add --no-cache \ 
+    libstdc++ \
+    g++
+
 # Set the working directory
 WORKDIR /usr/src/discordbot
 
-# Copy only the installed packages from builder
+# Copy Python packages from builder stage
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
-# Install runtime dependencies (only what's absolutely needed)
-RUN apk add --no-cache g++
-
-# Copy the application source code (only what's needed)
+# Copy only the application source code needed to run
 COPY bot.py .
 COPY src/ ./src/
 
