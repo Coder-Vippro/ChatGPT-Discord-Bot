@@ -1,12 +1,5 @@
 name: Build and Deploy ChatGPT-Discord-Bot
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
   workflow_dispatch:
 
 jobs:
