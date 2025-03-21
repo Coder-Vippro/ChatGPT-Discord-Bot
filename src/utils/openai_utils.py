@@ -56,13 +56,13 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "code_interpreter",
-                "description": "Run code in Python and C++. Use this to execute code, perform calculations. This can run only with default Python and C++ libraries.",
+                "description": "Run code in Python with support for data visualization libraries. Use this to execute code, perform calculations, create charts, and analyze data files. Supports key data science and visualization libraries.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "code": {
                             "type": "string",
-                            "description": "The code to execute"
+                            "description": "The code to execute. For data visualization, you can use pandas, matplotlib, seaborn, numpy, plotly, bokeh, altair, and other common data science libraries. When generating charts, remember to save the output as bytes using BytesIO."
                         },
                         "language": {
                             "type": "string",
@@ -73,6 +73,15 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                         "input": {
                             "type": "string",
                             "description": "Optional input data for the code"
+                        },
+                        "include_visualization": {
+                            "type": "boolean",
+                            "description": "Set to true if the code generates a chart or visualization that should be displayed to the user and stored in history.",
+                            "default": False
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "Optional path to a data file to be processed by the code. Used when analyzing uploaded data files."
                         }
                     },
                     "required": ["code"]
@@ -100,29 +109,6 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                         }
                     },
                     "required": ["prompt"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "analyze_data",
-                "description": "Analyze data files (CSV, Excel) and create visualizations. Use this when users need to analyze data, create charts, or extract insights from their data files.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The query describing what analysis to perform on the data, including what type of chart to create (e.g. 'Create a histogram of ages', 'Show a pie chart of categories', 'Calculate average by group'), translate all user request to english before process",
-                        },
-                        "visualization_type": {
-                            "type": "string",
-                            "description": "The type of visualization to create",
-                            "enum": ["bar", "line", "pie", "scatter", "histogram", "auto"],
-                            "default": "auto"
-                        }
-                    },
-                    "required": ["query"]
                 }
             }
         },

@@ -65,15 +65,22 @@ def sanitize_code(code: str, language: str) -> Tuple[bool, str]:
     
     # List of banned imports/includes and dangerous operations
     python_banned = [
-        'os.system', 'subprocess', 'open(', '.open(', 'eval(', 'exec(', '__import__(',
-        'importlib', '.read(', '.write(', 'shutil', '.unlink(', '.remove(', '.rmdir(',
-        'socket', 'requests', 'urllib', 'curl', 'wget', '.chmod', '.chown',
-        'os.path', 'pathlib', '__file__', '__builtins__._', 'file(', 'with open',
-        'io.open', 'fileinput', 'tempfile', '.mktemp', '.mkstemp', '.NamedTemporaryFile',
-        'shelve', 'dbm', 'sqlite3', 'pickle', 'marshal', '.loads(', '.dumps(',
+        'os.system', 'subprocess.call', 'subprocess.run', 'subprocess.Popen', 'exec(', '__import__(',
+        '.mkfifo', '.chmod', '.chown', '.getstatusoutput',
+        'socket', 'urllib.urlopen', 'curl', 'wget', 
+        'dbm', 'pickle', 'marshal', '.loads(', '.dumps(',
         'getattr(', 'setattr(', 'delattr(', '__class__', '__bases__', '__subclasses__',
-        '__globals__', '__getattribute__', '.mro(', 'ctypes', 'platform'
+        '__globals__', '__getattribute__', '.mro(', 'ctypes'
     ]
+    
+    # Excluded banned items to allow data visualization and file operations:
+    # - Removed 'open(', '.open(', '.read(', '.write(' to allow file operations
+    # - Removed 'importlib' to allow dynamic imports of visualization libraries
+    # - Removed 'os.path', 'pathlib', 'with open', 'io.open' to allow file path handling
+    # - Removed 'tempfile', '.mktemp', '.mkstemp', '.NamedTemporaryFile' to allow temp file creation
+    # - Removed 'requests' to allow API data fetching
+    # - Removed 'platform' to allow system info checks
+    # - Removed 'shutil', '.unlink(', '.remove(', '.rmdir(' for file management
     
     cpp_banned = [
         'system(', 'exec', 'popen', 'fork', 'remove(', 'unlink(',
@@ -117,20 +124,31 @@ def sanitize_code(code: str, language: str) -> Tuple[bool, str]:
             match = re.match(import_pattern, line)
             if match:
                 module = match.group(1) or match.group(2).split()[0].split('.')[0]
-                if module in ['os', 'subprocess', 'sys', 'shutil', 'socket', 'requests', 'io', 
-                             'pathlib', 'glob', 'fnmatch', 'fileinput', 'linecache', 
-                             'pickle', 'dbm', 'sqlite3', 'ctypes', 'platform']:
+                # Allow essential data analysis libraries but block dangerous ones
+                if module in ['subprocess', 'ctypes']:
                     code_logger.warning(f"Forbidden module import detected: {module}")
                     return False, f"Forbidden module import: {module}"
         
+        # Fix the code indentation before adding the safety wrapper
+        # Remove any common indentation to normalize first
+        lines = code.split('\n')
+        if lines:
+            # Find minimum indentation that is not blank lines
+            non_empty_lines = [line for line in lines if line.strip()]
+            if non_empty_lines:
+                min_indent = min(len(line) - len(line.lstrip()) for line in non_empty_lines)
+                # Remove that indentation from all lines
+                if min_indent > 0:
+                    lines = [line[min_indent:] if line.strip() else line for line in lines]
+                code = '\n'.join(lines)
+        
         # Simple safety header with just timeout and exception handling
         # Avoid complex sandboxing that might fail in Alpine
-        safety_header = """
-# Simple timeout mechanism
-import time
+        safety_header = """import time
 import threading
 import signal
 import sys
+import os
 
 def timeout_handler(signum, frame):
     print('Code execution timed out (exceeded 10 seconds)')
@@ -157,7 +175,7 @@ timer.start()
 try:
 """
         
-        # Add indentation for user code
+        # Add indentation for user code - ensure consistent indentation
         indented_code = "\n".join("    " + line for line in code.split("\n"))
         
         # Add exception handling and ending the try block
@@ -346,6 +364,34 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
         code_logger.warning(f"Unsupported language: {language}")
         return f"Error: Unsupported language '{language}'. Please use 'python' or 'cpp'. Return code: 1"
     
+    # Pre-install required packages for data analysis
+    if language == 'python' and ('import pandas' in code or 'from pandas' in code):
+        try:
+            # Check if we need to install key data analysis packages
+            code_logger.info("Data analysis code detected. Ensuring required packages are installed...")
+            packages_to_check = ['pandas', 'numpy', 'matplotlib', 'seaborn']
+            for package in packages_to_check:
+                if package in code:
+                    try:
+                        # Try importing the package
+                        __import__(package)
+                        code_logger.info(f"Package {package} is already installed.")
+                    except ImportError:
+                        # If import fails, install the package
+                        code_logger.info(f"Installing missing package: {package}")
+                        result = subprocess.run(
+                            [sys.executable, "-m", "pip", "install", package],
+                            capture_output=True,
+                            text=True,
+                            check=False
+                        )
+                        if result.returncode != 0:
+                            code_logger.warning(f"Failed to install {package}: {result.stderr}")
+                        else:
+                            code_logger.info(f"Successfully installed {package}")
+        except Exception as e:
+            code_logger.warning(f"Error checking/installing data analysis packages: {str(e)}")
+    
     # Sanitize the code first
     is_safe, sanitized_code = sanitize_code(code, language)
     if not is_safe:
@@ -393,14 +439,42 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
                     # Set process environment to restrict access to the system but keep necessary paths
                     env = dict(os.environ)  # Start with current environment
                     
-                    # Override specific variables for sandboxing
-                    env.update({
-                        'PYTHONIOENCODING': 'utf-8',  # Ensure proper encoding
-                        'TEMP': temp_dir,  # Set temp directory to our controlled directory
+                    # Preserve important environment variables for package access
+                    critical_env_vars = {
+                        'PYTHONPATH': env.get('PYTHONPATH', ''),
+                        'PYTHONHOME': env.get('PYTHONHOME', ''),
+                        'PATH': env.get('PATH', ''),
+                        'PYTHONIOENCODING': 'utf-8',
+                        'TEMP': temp_dir,
                         'TMP': temp_dir,
-                    })
+                    }
+                    
+                    # If using a virtual environment, make sure to carry those variables
+                    if 'VIRTUAL_ENV' in env:
+                        critical_env_vars['VIRTUAL_ENV'] = env['VIRTUAL_ENV']
+                    
+                    # Use environment variables from the current process to ensure access to installed packages
+                    env.update(critical_env_vars)
                     
                     code_logger.debug(f"Starting Python subprocess with executable: {python3_executable}")
+                    
+                    # Add a simple check at the beginning of the file to verify pandas is available
+                    # This will help with troubleshooting but won't interfere with code execution
+                    verify_header = ""
+                    if 'import pandas' in code or 'from pandas' in code:
+                        verify_header = """
+# Verify pandas is installed
+try:
+    import pandas
+    print("✓ Pandas is available (version: " + pandas.__version__ + ")")
+except ImportError:
+    print("✗ Pandas is not available")
+
+"""
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            original_content = f.read()
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(verify_header + original_content)
                     
                     # Try using direct shell command first for better compatibility in Alpine
                     shell_command = f"{python3_executable} {file_path}"
