@@ -31,15 +31,16 @@ WORKDIR /app
 # Copy requirements file
 COPY requirements.txt .
 
-# Split requirements install for better caching
-# Install tiktoken separately first (the slow one)
-RUN pip install --user --no-cache-dir tiktoken
+# Install all requirements in a single layer with aggressive cleanup
+RUN pip install --user --no-cache-dir -r requirements.txt && \
+    find /root/.local -name "__pycache__" -type d -exec rm -rf {} + && \
+    find /root/.local -name "*.pyc" -delete && \
+    find /root/.local -name "*.pyo" -delete && \
+    find /root/.local -name "*.so" -exec strip -s {} \; || true && \
+    find /root/.local -name "*.so.*" -exec strip -s {} \; || true && \
+    rm -rf /root/.cargo /root/.cache
 
-# Install other requirements
-RUN pip install --user --no-cache-dir -r requirements.txt \
-    && find /root/.local -name "__pycache__" -type d -exec rm -rf {} +
-
-# Runtime stage with absolute minimal dependencies
+# Runtime stage with minimal dependencies
 FROM python:3.13.2-alpine AS runtime
 
 # Set environment variables
@@ -47,15 +48,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/home/appuser/.local/bin:$PATH"
 
-# Create same non-root user as in builder
+# Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
     && mkdir -p /home/appuser/app/logs /home/appuser/app/temp_charts \
     && chown -R appuser:appgroup /home/appuser
 
-# Add only the necessary runtime dependencies
-RUN apk add --no-cache \
-    libstdc++ \
-    g++
+# Add only necessary runtime dependencies
+RUN apk add --no-cache g++ && \
+    rm -rf /var/cache/apk/* /tmp/*
 
 # Set the working directory
 WORKDIR /home/appuser/app

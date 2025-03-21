@@ -59,6 +59,7 @@ class ImageGenerator:
                 "success": True,
                 "prompt": prompt,
                 "binary_images": [],
+                "image_urls": [],  # Initialize empty image URLs list
                 "image_count": 0
             }
             
@@ -77,7 +78,9 @@ class ImageGenerator:
                 elif hasattr(images, 'images') and images.images:
                     image_urls = images.images
                 
+                # Update result with image info
                 result["image_count"] = len(image_urls)
+                result["image_urls"] = image_urls  # Add image URLs to result
                 
                 # Get binary data for each image
                 for img_url in image_urls:
@@ -90,8 +93,22 @@ class ImageGenerator:
                     except Exception as e:
                         logging.error(f"Error downloading image {img_url}: {str(e)}")
             
+            # Log success or failure
+            if result["image_count"] > 0:
+                logging.info(f"Generated {result['image_count']} images for prompt: {prompt[:50]}...")
+            else:
+                logging.warning(f"Image generation succeeded but no images were received for prompt: {prompt[:50]}...")
+            
             return result
                 
         except Exception as e:
-            logging.error(f"Error in generate_image: {str(e)}")
-            return {"success": False, "error": str(e)}
+            error_message = f"Error in generate_image: {str(e)}"
+            logging.error(error_message)
+            return {
+                "success": False, 
+                "error": str(e),
+                "prompt": prompt,
+                "image_urls": [],  # Include empty image_urls even in error case
+                "image_count": 0,
+                "binary_images": []
+            }

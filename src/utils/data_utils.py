@@ -7,6 +7,11 @@ import asyncio
 import functools
 import os
 import numpy as np
+import time
+import re
+import seaborn as sns
+import json
+import glob
 from datetime import datetime
 from typing import Tuple, Dict, Any, Optional, List
 
@@ -24,7 +29,14 @@ plt.rcParams.update({
     'figure.titlesize': 18
 })
 
-async def process_data_file(file_bytes: bytes, filename: str, query: str) -> Tuple[str, Optional[bytes], Optional[Dict[str, Any]]]:
+# Define a consistent path for chart storage
+CHARTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "temp_charts")
+os.makedirs(CHARTS_DIR, exist_ok=True)
+
+# Track charts by user request to prevent duplicates
+active_chart_requests = {}
+
+async def process_data_file(file_bytes: bytes, filename: str, query: str, user_id: Optional[str] = None) -> Tuple[str, Optional[bytes], Optional[Dict[str, Any]]]:
     """
     Analyze and visualize data from CSV/Excel files.
     
@@ -32,22 +44,49 @@ async def process_data_file(file_bytes: bytes, filename: str, query: str) -> Tup
         file_bytes: File content as bytes
         filename: File name
         query: User command/query
+        user_id: Optional user ID to track requests
         
     Returns:
         Tuple containing text summary, image bytes (if any) and metadata
     """
     try:
+        # Generate a unique request ID if user_id is provided
+        request_id = f"{user_id}_{int(time.time())}" if user_id else str(int(time.time()))
+        
+        # Check if we already processed this request recently
+        if user_id and user_id in active_chart_requests:
+            # If the request was made in the last 5 seconds, return the existing result
+            last_request_time = active_chart_requests[user_id].get("timestamp", 0)
+            if time.time() - last_request_time < 5:
+                logging.info(f"Using cached chart result for user {user_id} (within 5s)")
+                return active_chart_requests[user_id]["result"]
+        
         # Use thread pool to avoid blocking event loop with CPU-bound tasks
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None,
-            functools.partial(_process_data_file_sync, file_bytes, filename, query)
+            functools.partial(_process_data_file_sync, file_bytes, filename, query, request_id)
         )
+        
+        # Store the result for this user
+        if user_id:
+            active_chart_requests[user_id] = {
+                "timestamp": time.time(),
+                "result": result,
+                "request_id": request_id
+            }
+            
+            # Clean up old cached results after 30 minutes
+            for uid in list(active_chart_requests.keys()):
+                if time.time() - active_chart_requests[uid].get("timestamp", 0) > 1800:
+                    del active_chart_requests[uid]
+                    
+        return result
     except Exception as e:
         logging.error(f"Error processing data file: {str(e)}")
         return f"Error processing file {filename}: {str(e)}", None, None
 
-def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tuple[str, Optional[bytes], Optional[Dict[str, Any]]]:
+def _process_data_file_sync(file_bytes: bytes, filename: str, query: str, request_id: str) -> Tuple[str, Optional[bytes], Optional[Dict[str, Any]]]:
     """Synchronous version of process_data_file to run in thread pool"""
     file_obj = io.BytesIO(file_bytes)
     
@@ -122,11 +161,6 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
             if len(categorical_cols) > 3:
                 summary += f"...and {len(categorical_cols) - 3} other categorical columns.\n"
             summary += "\n"
-            
-        # Determine if a chart should be created
-        chart_keywords = ["chart", "graph", "plot", "visualization", "visualize", 
-                         "histogram", "bar chart", "line chart", "pie chart", "scatter"]
-        create_chart = any(keyword in query.lower() for keyword in chart_keywords)
         
         # Metadata to return
         metadata = {
@@ -136,17 +170,70 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
             "column_names": column_names,
             "numeric_columns": numeric_cols,
             "categorical_columns": categorical_cols,
-            "date_columns": date_cols
+            "date_columns": date_cols,
+            "request_id": request_id
         }
         
+        # Check for [no_chart] flag - if present, don't generate a chart
+        if "[no_chart]" in query:
+            return summary, None, metadata
+            
+        # Extract chart type from query if specified
+        chart_type = None
+        chart_keywords = {
+            "bar": ["bar chart", "bar graph", "barchart", "column chart"],
+            "pie": ["pie chart", "piechart", "donut chart", "donut"],
+            "line": ["line chart", "line graph", "linechart", "trend", "time series"],
+            "scatter": ["scatter plot", "scatter chart", "scatterplot", "correlation", "relationship"],
+            "histogram": ["histogram", "distribution", "frequency"],
+            "heatmap": ["heatmap", "heat map", "correlation matrix"],
+            "boxplot": ["boxplot", "box plot", "box and whisker"]
+        }
+        
+        for ctype, keywords in chart_keywords.items():
+            if any(kw.lower() in query.lower() for kw in keywords):
+                chart_type = ctype
+                break
+                
+        # For visualization_type parameter from analyze_data function
+        if "[Use " in query and " chart]" in query:
+            viz_match = re.search(r'\[Use ([a-zA-Z]+) chart\]', query)
+            if viz_match:
+                specified_type = viz_match.group(1).lower()
+                if specified_type in ["bar", "pie", "line", "scatter", "histogram", "heatmap", "boxplot"]:
+                    chart_type = specified_type
+        
+        # Determine if a chart should be created
+        create_chart = True
+            
         # Create chart if requested or by default
         chart_image = None
-        if (create_chart or len(query) < 10) and len(numeric_cols) > 0:  # Default to chart for short queries
+        if create_chart and len(numeric_cols) > 0:  # Need at least one numeric column
             # Use a better visual style
             plt.style.use('ggplot')
             
-            # Determine chart type based on keywords in the query
-            if any(keyword in query.lower() for keyword in ["pie", "circle"]):
+            # If no specific chart type was found in the query, auto-detect the best type
+            if not chart_type:
+                # Determine the best chart type based on data structure
+                if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+                    if len(df[categorical_cols[0]].unique()) <= 6:  # Few categories
+                        chart_type = "pie"
+                    else:
+                        chart_type = "bar"  # More categories
+                elif len(date_cols) > 0 and len(numeric_cols) > 0:
+                    chart_type = "line"  # Time series
+                elif len(numeric_cols) >= 2:
+                    chart_type = "scatter"  # Two numeric columns
+                elif len(numeric_cols) == 1:
+                    chart_type = "histogram"  # Single numeric column
+                else:
+                    chart_type = "bar"  # Default
+                    
+            # Save the detected chart type to metadata
+            metadata["chart_type"] = chart_type
+            
+            # Create the chart based on the determined type
+            if chart_type == "pie":
                 # Pie chart - works best with categorical data
                 if len(categorical_cols) > 0 and len(numeric_cols) > 0:
                     cat_col = categorical_cols[0]
@@ -194,7 +281,7 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                     plt.title(f"Distribution of {num_col} by {cat_col}", pad=20)
                     plt.tight_layout()
                     
-            elif any(keyword in query.lower() for keyword in ["bar", "column"]):
+            elif chart_type == "bar":
                 # Bar chart
                 if len(categorical_cols) > 0 and len(numeric_cols) > 0:
                     cat_col = categorical_cols[0]
@@ -256,7 +343,7 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                     plt.xticks(rotation=30, ha='right')
                     plt.tight_layout(pad=2)
                     
-            elif any(keyword in query.lower() for keyword in ["scatter", "dispersion"]):
+            elif chart_type == "scatter":
                 # Enhanced scatter plot
                 if len(numeric_cols) >= 2:
                     plt.figure(figsize=(12, 8))
@@ -316,7 +403,7 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                     plt.grid(True, alpha=0.3)
                     plt.tight_layout(pad=2)
                     
-            elif any(keyword in query.lower() for keyword in ["histogram", "hist", "distribution"]):
+            elif chart_type == "histogram":
                 # Enhanced histogram
                 plt.figure(figsize=(12, 7))
                 # Calculate optimal number of bins
@@ -331,29 +418,48 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                 else:
                     bins = 15  # Default if calculation fails
                 
-                # Plot histogram with KDE
-                ax = plt.subplot(111)
-                n, bins_arr, patches = ax.hist(
-                    data, 
-                    bins=bins, 
-                    alpha=0.7,
-                    color='#5975a4', 
-                    edgecolor='#344e7a',
-                    linewidth=1.5,
-                    density=True  # Normalize for KDE overlay
-                )
-                
-                # Add KDE line for smoother visualization
-                from scipy import stats
-                kde_x = np.linspace(data.min(), data.max(), 1000)
-                kde = stats.gaussian_kde(data)
-                ax.plot(kde_x, kde(kde_x), 'r-', linewidth=2, label='Density')
-                
-                # Add vertical lines for key statistics
-                mean_val = data.mean()
-                median_val = data.median()
-                ax.axvline(mean_val, color='green', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
-                ax.axvline(median_val, color='orange', linestyle='-.', linewidth=2, label=f'Median: {median_val:.2f}')
+                try:
+                    # Plot histogram with KDE
+                    ax = plt.subplot(111)
+                    n, bins_arr, patches = ax.hist(
+                        data, 
+                        bins=bins, 
+                        alpha=0.7,
+                        color='#5975a4', 
+                        edgecolor='#344e7a',
+                        linewidth=1.5,
+                        density=True  # Normalize for KDE overlay
+                    )
+                    
+                    # Add KDE line for smoother visualization
+                    from scipy import stats
+                    kde_x = np.linspace(data.min(), data.max(), 1000)
+                    kde = stats.gaussian_kde(data)
+                    ax.plot(kde_x, kde(kde_x), 'r-', linewidth=2, label='Density')
+                    
+                    # Add vertical lines for key statistics
+                    mean_val = data.mean()
+                    median_val = data.median()
+                    ax.axvline(mean_val, color='green', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
+                    ax.axvline(median_val, color='orange', linestyle='-.', linewidth=2, label=f'Median: {median_val:.2f}')
+                except Exception as e:
+                    # Fallback to simple histogram if KDE fails
+                    logging.warning(f"KDE calculation failed: {str(e)}. Using simple histogram.")
+                    plt.clf()  # Clear the figure
+                    plt.hist(
+                        data, 
+                        bins=bins,
+                        alpha=0.7,
+                        color='#5975a4', 
+                        edgecolor='#344e7a',
+                        linewidth=1.5
+                    )
+                    
+                    # Add vertical lines for key statistics
+                    mean_val = data.mean()
+                    median_val = data.median()
+                    plt.axvline(mean_val, color='green', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
+                    plt.axvline(median_val, color='orange', linestyle='-.', linewidth=2, label=f'Median: {median_val:.2f}')
                 
                 plt.title(f"Distribution of {numeric_cols[0]}", pad=20)
                 plt.xlabel(numeric_cols[0], fontweight='bold')
@@ -362,71 +468,66 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                 plt.legend()
                 plt.tight_layout(pad=2)
                 
-            elif len(date_cols) > 0 and len(numeric_cols) > 0:
+            elif chart_type == "line":
                 # Enhanced time series chart
                 plt.figure(figsize=(14, 8))
-                date_col = date_cols[0]
-                num_col = numeric_cols[0]
                 
-                # Sort by date and plot
-                temp_df = df[[date_col, num_col]].dropna().sort_values(date_col)
-                
-                # Limit number of points for readability if too many
-                if len(temp_df) > 100:
-                    # Resample to reduce point density
-                    temp_df = temp_df.set_index(date_col)
-                    # Determine appropriate frequency based on date range
-                    date_range = (temp_df.index.max() - temp_df.index.min()).days
-                    if date_range > 365*2:  # More than 2 years
-                        freq = 'M'  # Monthly
-                    elif date_range > 90:  # More than 3 months
-                        freq = 'W'  # Weekly
-                    else:
-                        freq = 'D'  # Daily
+                if len(date_cols) > 0 and len(numeric_cols) > 0:
+                    date_col = date_cols[0]
+                    num_col = numeric_cols[0]
                     
-                    temp_df = temp_df.resample(freq).mean().reset_index()
-                
-                # Plot with enhanced styling
-                plt.plot(
-                    temp_df[date_col], 
-                    temp_df[num_col], 
-                    marker='o', 
-                    markersize=6,
-                    markerfacecolor='white',
-                    markeredgecolor='#5975a4',
-                    markeredgewidth=1.5,
-                    linestyle='-', 
-                    linewidth=2,
-                    color='#5975a4'
-                )
-                
-                plt.title(f"{num_col} over time", pad=20)
-                plt.xlabel("Date", fontweight='bold')
-                plt.ylabel(num_col, fontweight='bold')
-                
-                # Format x-axis date labels better
-                plt.gcf().autofmt_xdate()
-                plt.grid(True, alpha=0.3)
-                
-                # Add trend line
-                try:
-                    x = np.arange(len(temp_df))
-                    z = np.polyfit(x, temp_df[num_col], 1)
-                    p = np.poly1d(z)
-                    plt.plot(temp_df[date_col], p(x), "r--", linewidth=2, 
-                             label=f"Trend line (slope: {z[0]:.4f})")
-                    plt.legend()
-                except Exception:
-                    pass  # Skip trend line if it fails
-                
-                plt.tight_layout(pad=2)
-                
-            else:
-                # Default: enhanced line chart for numeric data
-                if len(numeric_cols) > 0:
-                    plt.figure(figsize=(14, 8))
+                    # Sort by date and plot
+                    temp_df = df[[date_col, num_col]].dropna().sort_values(date_col)
                     
-                    # Get the data
+                    # Limit number of points for readability if too many
+                    if len(temp_df) > 100:
+                        # Resample to reduce point density
+                        temp_df = temp_df.set_index(date_col)
+                        # Determine appropriate frequency based on date range
+                        date_range = (temp_df.index.max() - temp_df.index.min()).days
+                        if date_range > 365*2:  # More than 2 years
+                            freq = 'M'  # Monthly
+                        elif date_range > 90:  # More than 3 months
+                            freq = 'W'  # Weekly
+                        else:
+                            freq = 'D'  # Daily
+                        
+                        temp_df = temp_df.resample(freq).mean().reset_index()
+                    
+                    # Plot with enhanced styling
+                    plt.plot(
+                        temp_df[date_col], 
+                        temp_df[num_col], 
+                        marker='o', 
+                        markersize=6,
+                        markerfacecolor='white',
+                        markeredgecolor='#5975a4',
+                        markeredgewidth=1.5,
+                        linestyle='-', 
+                        linewidth=2,
+                        color='#5975a4'
+                    )
+                    
+                    plt.title(f"{num_col} over time", pad=20)
+                    plt.xlabel("Date", fontweight='bold')
+                    plt.ylabel(num_col, fontweight='bold')
+                    
+                    # Format x-axis date labels better
+                    plt.gcf().autofmt_xdate()
+                    plt.grid(True, alpha=0.3)
+                    
+                    # Add trend line
+                    try:
+                        x = np.arange(len(temp_df))
+                        z = np.polyfit(x, temp_df[num_col], 1)
+                        p = np.poly1d(z)
+                        plt.plot(temp_df[date_col], p(x), "r--", linewidth=2, 
+                                 label=f"Trend line (slope: {z[0]:.4f})")
+                        plt.legend()
+                    except Exception:
+                        pass  # Skip trend line if it fails
+                else:
+                    # Standard line chart for numeric data
                     data = df[numeric_cols[0]]
                     
                     # If too many points, bin or resample
@@ -463,7 +564,68 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
                     plt.title(f"Line chart for {numeric_cols[0]}", pad=20)
                     plt.ylabel(numeric_cols[0], fontweight='bold')
                     plt.grid(True, alpha=0.3)
-                    plt.tight_layout(pad=2)
+                
+                plt.tight_layout(pad=2)
+                
+            elif chart_type == "heatmap":
+                # Create a correlation heatmap if we have multiple numeric columns
+                if len(numeric_cols) >= 2:
+                    plt.figure(figsize=(12, 10))
+                    corr = df[numeric_cols].corr()
+                    sns.heatmap(corr, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+                    plt.title('Correlation Matrix', pad=20)
+                
+                # Create a crosstab heatmap if we have categorical columns
+                elif len(categorical_cols) >= 2:
+                    plt.figure(figsize=(12, 10))
+                    cat_col1 = categorical_cols[0]
+                    cat_col2 = categorical_cols[1]
+                    
+                    # Limit to top categories to prevent overly large heatmaps
+                    top_cats1 = df[cat_col1].value_counts().nlargest(10).index
+                    top_cats2 = df[cat_col2].value_counts().nlargest(10).index
+                    
+                    # Filter dataframe to only include top categories
+                    filtered_df = df[df[cat_col1].isin(top_cats1) & df[cat_col2].isin(top_cats2)]
+                    
+                    # Create crosstab
+                    cross_tab = pd.crosstab(filtered_df[cat_col1], filtered_df[cat_col2])
+                    
+                    # Plot heatmap
+                    sns.heatmap(cross_tab, annot=True, cmap='YlGnBu', fmt='d')
+                    plt.title(f'Frequency of {cat_col1} vs {cat_col2}', pad=20)
+                    
+                plt.tight_layout(pad=2)
+                
+            elif chart_type == "boxplot":
+                plt.figure(figsize=(12, 8))
+                
+                if len(categorical_cols) > 0 and len(numeric_cols) > 0:
+                    cat_col = categorical_cols[0]
+                    num_col = numeric_cols[0]
+                    
+                    # Limit to top 10 categories to avoid overcrowding
+                    top_cats = df[cat_col].value_counts().nlargest(10).index
+                    plot_df = df[df[cat_col].isin(top_cats)]
+                    
+                    # Create the boxplot
+                    sns.boxplot(x=cat_col, y=num_col, data=plot_df)
+                    plt.title(f'Distribution of {num_col} by {cat_col}', pad=20)
+                    plt.xticks(rotation=45, ha='right')
+                else:
+                    # Simple boxplot for numeric columns
+                    plt.boxplot([df[col].dropna() for col in numeric_cols[:5]], 
+                                labels=numeric_cols[:5],
+                                patch_artist=True)
+                    plt.title('Distribution of Numeric Variables', pad=20)
+                    plt.ylabel('Value')
+                    plt.grid(axis='y', linestyle='--', alpha=0.7)
+                
+                plt.tight_layout(pad=2)
+            
+            # Add timestamp on the chart for tracking purposes
+            plt.figtext(0.02, 0.02, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 
+                      fontsize=8, color='gray')
             
             # Save chart to bytes buffer with higher DPI for better quality
             buf = io.BytesIO()
@@ -472,25 +634,32 @@ def _process_data_file_sync(file_bytes: bytes, filename: str, query: str) -> Tup
             chart_image = buf.read()
             plt.close()
             
-            # Create a timestamp for the chart file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            chart_filename = f"chart_{timestamp}.png"
+            # Create a unique chart filename using request_id
+            chart_filename = f"chart_{request_id}.png"
             
-            # Save chart to temporary file
-            chart_dir = os.path.join(os.getcwd(), "temp_charts")
-            if not os.path.exists(chart_dir):
-                os.makedirs(chart_dir)
-                
-            chart_path = os.path.join(chart_dir, chart_filename)
+            # Save chart to temporary file in the consistent chart directory
+            chart_path = os.path.join(CHARTS_DIR, chart_filename)
             with open(chart_path, "wb") as f:
                 f.write(chart_image)
             
-            summary += f"Chart created based on the data with improved visualization."
+            # Add information about the chart to the summary
+            summary += f"\nChart created: {chart_type.title()} chart for {filename}."
+            if chart_type == "bar" and len(categorical_cols) > 0 and len(numeric_cols) > 0:
+                summary += f" Shows {numeric_cols[0]} values grouped by {categorical_cols[0]}."
+            elif chart_type == "pie" and len(categorical_cols) > 0:
+                summary += f" Shows distribution of {categorical_cols[0]}."
+            elif chart_type == "scatter" and len(numeric_cols) >= 2:
+                corr_val = df[numeric_cols[0]].corr(df[numeric_cols[1]])
+                summary += f" Shows relationship between {numeric_cols[0]} and {numeric_cols[1]}. Correlation: {corr_val:.2f}"
+            elif chart_type == "line" and len(date_cols) > 0:
+                summary += f" Shows trend of {numeric_cols[0]} over time."
+            elif chart_type == "histogram":
+                summary += f" Shows distribution of {numeric_cols[0]}."
             
             # Add chart filename to metadata
-            metadata["chart_filename"] = chart_filename
-            metadata["chart_path"] = chart_path
+            metadata["chart_filename"] = chart_path
             metadata["chart_created_at"] = datetime.now().timestamp()
+            metadata["chart_type"] = chart_type
             
         return summary, chart_image, metadata
         
@@ -506,16 +675,15 @@ async def cleanup_old_charts(max_age_hours=1):
         max_age_hours: Maximum age in hours before deleting charts
     """
     try:
-        chart_dir = os.path.join(os.getcwd(), "temp_charts")
-        if not os.path.exists(chart_dir):
+        if not os.path.exists(CHARTS_DIR):
             return
             
         now = datetime.now().timestamp()
         deleted_count = 0
         
-        for filename in os.listdir(chart_dir):
+        for filename in os.listdir(CHARTS_DIR):
             if filename.startswith("chart_") and filename.endswith(".png"):
-                file_path = os.path.join(chart_dir, filename)
+                file_path = os.path.join(CHARTS_DIR, filename)
                 file_modified_time = os.path.getmtime(file_path)
                 
                 # If file is older than max_age_hours
@@ -528,5 +696,11 @@ async def cleanup_old_charts(max_age_hours=1):
         
         if deleted_count > 0:
             logging.info(f"Cleaned up {deleted_count} chart files older than {max_age_hours} hours")
+            
+        # Also clean up any active_chart_requests older than max_age_hours
+        for user_id in list(active_chart_requests.keys()):
+            if now - active_chart_requests[user_id].get("timestamp", 0) > (max_age_hours * 3600):
+                del active_chart_requests[user_id]
+                
     except Exception as e:
         logging.error(f"Error in cleanup_old_charts: {str(e)}")

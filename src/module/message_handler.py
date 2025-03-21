@@ -8,6 +8,7 @@ import concurrent.futures
 from typing import Dict, Any, List
 import io
 import aiohttp
+import os
 from datetime import datetime
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
@@ -104,6 +105,101 @@ class MessageHandler:
                     await self._handle_user_message(message)
             else:
                 await self.bot.process_commands(message)
+    
+    async def _analyze_data(self, args: Dict[str, Any]) -> str:
+        """
+        Analyze data from recently uploaded CSV/Excel files.
+        
+        Args:
+            args: Analysis parameters
+            
+        Returns:
+            JSON string with analysis results
+        """
+        query = args.get("query", "")
+        visualization_type = args.get("visualization_type", "auto")
+        
+        if not query:
+            return json.dumps({"error": "No analysis request provided"})
+        
+        # Find user_id from current task to track chart generation
+        current_task = asyncio.current_task()
+        user_id = None
+        
+        for uid, tasks in user_tasks.items():
+            if current_task in tasks:
+                user_id = uid
+                break
+        
+        if not user_id:
+            logging.warning("Could not identify user_id for analyze_data call")
+        
+        # Check if there are any data files
+        active_data_files = {}
+        for file_user_id, data_info in self.user_data_files.items():
+            # Only consider files uploaded in the last hour
+            if datetime.now().timestamp() - data_info.get("timestamp", 0) < 3600:  # 1 hour
+                active_data_files[file_user_id] = data_info
+        
+        if not active_data_files:
+            return json.dumps({
+                "error": "No data files found. Please upload a CSV or Excel file first."
+            })
+            
+        # Use the most recent data file
+        latest_user_id = max(active_data_files.keys(), key=lambda k: active_data_files[k]["timestamp"])
+        data_info = active_data_files[latest_user_id]
+        
+        try:
+            file_bytes = data_info["bytes"]
+            filename = data_info["filename"]
+            
+            # Process data file with specified visualization type if provided
+            modified_query = query
+            if visualization_type and visualization_type != "auto":
+                modified_query = f"{query} [Use {visualization_type} chart]"
+            
+            # Analyze data using data_utils - pass user_id to prevent duplicate chart creation
+            summary, chart_image, metadata = await process_data_file(
+                file_bytes, 
+                filename, 
+                modified_query, 
+                str(user_id) if user_id else None
+            )
+            
+            if chart_image and "chart_filename" in metadata:
+                chart_path = metadata["chart_filename"]
+                chart_basename = os.path.basename(chart_path)
+                
+                # Return results with chart file path
+                return json.dumps({
+                    "summary": summary,
+                    "has_chart": True,
+                    "chart_filename": chart_path,
+                    "chart_display_name": chart_basename,
+                    "metadata": {
+                        "filename": metadata.get("filename", ""),
+                        "rows": metadata.get("rows", 0),
+                        "columns": metadata.get("columns", 0),
+                        "chart_type": metadata.get("chart_type", ""),
+                        "timestamp": metadata.get("timestamp", ""),
+                        "request_id": metadata.get("request_id", "")
+                    }
+                })
+            else:
+                return json.dumps({
+                    "summary": summary,
+                    "has_chart": False,
+                    "metadata": {
+                        "filename": metadata.get("filename", ""),
+                        "rows": metadata.get("rows", 0),
+                        "columns": metadata.get("columns", 0),
+                        "timestamp": metadata.get("timestamp", "")
+                    }
+                })
+        except Exception as e:
+            logging.error(f"Error analyzing data: {str(e)}")
+            return json.dumps({"error": f"Error analyzing data: {str(e)}"})
     
     def _should_respond_to_message(self, message: discord.Message) -> bool:
         """
@@ -256,23 +352,22 @@ class MessageHandler:
                                     "timestamp": datetime.now().timestamp()
                                 }
                                 
-                                # Analyze data
-                                summary, chart_image, metadata = await process_data_file(file_bytes, attachment.filename, query)
+                                # Analyze data for basic info ONLY - don't generate chart yet
+                                # We'll add a flag to prevent chart generation here
+                                summary, _, metadata = await process_data_file(
+                                    file_bytes, 
+                                    attachment.filename, 
+                                    query + " [no_chart]",  # Special flag to skip chart creation
+                                    str(user_id)
+                                )
                                 
                                 # Send analysis text
                                 await message.channel.send(summary[:2000])  # Discord message length limit
                                 
-                                # Send chart if available
-                                if chart_image:
-                                    await message.channel.send(
-                                        "Chart from data:",
-                                        file=discord.File(io.BytesIO(chart_image), filename=f"chart_{int(time.time())}.png")
-                                    )
+                                # More detailed analysis with AI - let the analyze_data tool generate the chart
+                                ai_prompt = f"I've uploaded a data file {attachment.filename}. {query}\n\nAnalyze this data and create a visualization that best represents the key insights. Be sure to consider the most appropriate chart type based on the data structure."
                                 
-                                # More detailed analysis with AI
-                                ai_prompt = f"I've uploaded a data file {attachment.filename}. {query}"
-                                
-                                # Call API for analysis
+                                # Call API for analysis - this will generate the chart through the tool
                                 await self._process_text_message(message, user_id, ai_prompt, model, history, start_time)
                                 return
                                 
@@ -427,13 +522,16 @@ class MessageHandler:
             if use_tools:
                 api_params["tools"] = get_tools_for_model()
             
-            # Flag to track if image generation was used
+            # Initialize variables to track tool responses
             image_generation_used = False
+            chart_filename = None
+            image_urls = []  # Will store unique image URLs
             
             # Make the initial API call with retry logic
             response = await self._retry_api_call(lambda: self.client.chat.completions.create(**api_params))
             
-            # Check if there are any tool calls to process
+            # Process tool calls if any
+            updated_messages = None
             if use_tools and response.choices[0].finish_reason == "tool_calls":
                 # Process tools
                 tool_calls = response.choices[0].message.tool_calls
@@ -473,8 +571,37 @@ class MessageHandler:
                     self.tool_functions
                 )
                 
+                # Process tool responses to extract important data (images, charts)
+                if updated_messages:
+                    # Look for image generation and data analysis tool responses
+                    for msg in updated_messages:
+                        if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
+                            try:
+                                content = msg.get('content', '')
+                                if isinstance(content, str) and '{' in content:
+                                    data = json.loads(content)
+                                    if 'image_urls' in data and data['image_urls']:
+                                        # Store the unique image URLs
+                                        for url in data['image_urls']:
+                                            if url not in image_urls:
+                                                image_urls.append(url)
+                                        
+                                        logging.info(f"Found {len(data['image_urls'])} image URLs in tool response")
+                            except Exception as e:
+                                logging.error(f"Error parsing image URLs: {str(e)}")
+                        
+                        elif msg.get('role') == 'tool' and msg.get('name') == 'analyze_data':
+                            try:
+                                content = msg.get('content', '')
+                                if isinstance(content, str) and '{' in content:
+                                    data = json.loads(content)
+                                    if data.get('has_chart') and 'chart_filename' in data:
+                                        chart_filename = data.get('chart_filename')
+                            except Exception as e:
+                                logging.error(f"Error parsing chart data: {str(e)}")
+                
                 # If tool calls were processed, make another API call with the updated messages
-                if tool_calls_processed:
+                if tool_calls_processed and updated_messages:
                     response = await self._retry_api_call(lambda: self.client.chat.completions.create(
                         model=model,
                         messages=updated_messages,
@@ -510,49 +637,12 @@ class MessageHandler:
                         
                     await self.db.save_history(user_id, history)
             
-            # Check if there are any image URLs to send from the image generation tool
-            image_urls = []
-            chart_filename = None
+            # Decide how to handle the response based on the tools that were used
+            # Don't send any additional image links - just send the model's response
+            await send_response(message.channel, reply)
             
-            # Check response from analyze_data tool
-            for msg in locals().get('updated_messages', []):
-                if msg.get('role') == 'tool' and msg.get('name') == 'analyze_data':
-                    try:
-                        content = msg.get('content', '')
-                        if isinstance(content, str) and '{' in content:
-                            data = json.loads(content)
-                            if data.get('has_chart') and 'chart_filename' in data:
-                                chart_filename = data.get('chart_filename')
-                    except Exception as e:
-                        logging.error(f"Error parsing chart data: {str(e)}")
-            
-            # Check response from generate_image tool
-            for msg in locals().get('updated_messages', []):
-                if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
-                    try:
-                        content = msg.get('content', '')
-                        if isinstance(content, str):
-                            data = json.loads(content) if '{' in content else {}
-                            if 'image_urls' in data:
-                                image_urls = data.get('image_urls', [])
-                                
-                                # Add timestamp to AI-generated images in the message content for storage
-                                # This affects how they're stored in history
-                                if reply and image_urls and image_generation_used:
-                                    # ... existing code for image processing ...
-                                    pass
-                    except Exception as e:
-                        logging.error(f"Error parsing image URLs: {str(e)}")
-            
-            # If image generation was used and we have image URLs, handle specially
-            if image_generation_used and image_urls:
-                # ... existing code for image handling ...
-                pass
-            elif chart_filename:
-                # Handle case where we have a chart from data analysis
-                await send_response(message.channel, reply)
-                
-                # Send chart if it exists
+            # Handle charts from data analysis if present
+            if chart_filename:
                 try:
                     with open(chart_filename, "rb") as f:
                         chart_data = f.read()
@@ -562,9 +652,6 @@ class MessageHandler:
                     )
                 except Exception as e:
                     logging.error(f"Error sending chart: {str(e)}")
-            else:
-                # Normal response without image generation
-                await send_response(message.channel, reply)
             
             # Log processing time for performance monitoring
             processing_time = time.time() - start_time
@@ -578,68 +665,6 @@ class MessageHandler:
             error_message = f"Error: {str(e)}"
             logging.error(f"Error in message processing: {error_message}")
             await message.channel.send(error_message)
-    
-    async def _analyze_data(self, args: Dict[str, Any]) -> str:
-        """
-        Analyze data from recently uploaded CSV/Excel files.
-        
-        Args:
-            args: Analysis parameters
-            
-        Returns:
-            JSON string with analysis results
-        """
-        query = args.get("query", "")
-        visualization_type = args.get("visualization_type", "auto")
-        
-        if not query:
-            return json.dumps({"error": "No analysis request provided"})
-        
-        # Check if there are any data files
-        active_data_files = {}
-        for user_id, data_info in self.user_data_files.items():
-            if datetime.now().timestamp() - data_info.get("timestamp", 0) < 3600:  # 1 hour
-                active_data_files[user_id] = data_info
-        
-        if not active_data_files:
-            return json.dumps({
-                "error": "No data files found. Please upload a CSV or Excel file first."
-            })
-            
-        # Use the most recent data file
-        latest_user_id = max(active_data_files.keys(), key=lambda k: active_data_files[k]["timestamp"])
-        data_info = active_data_files[latest_user_id]
-        
-        try:
-            file_bytes = data_info["bytes"]
-            filename = data_info["filename"]
-            
-            # Analyze data using data_utils
-            summary, chart_image, metadata = await process_data_file(file_bytes, filename, query)
-            
-            if chart_image:
-                # Save chart to temporary file
-                chart_filename = f"chart_{int(time.time())}.png"
-                
-                with open(chart_filename, "wb") as file:
-                    file.write(chart_image)
-                
-                # Return results with chart file path
-                return json.dumps({
-                    "summary": summary,
-                    "has_chart": True,
-                    "chart_filename": chart_filename,
-                    "metadata": metadata
-                })
-            else:
-                return json.dumps({
-                    "summary": summary,
-                    "has_chart": False,
-                    "metadata": metadata
-                })
-        except Exception as e:
-            logging.error(f"Error analyzing data: {str(e)}")
-            return json.dumps({"error": f"Error analyzing data: {str(e)}"})
     
     async def _set_reminder(self, args: Dict[str, Any]) -> str:
         """
@@ -940,3 +965,5 @@ class MessageHandler:
         
         # Shutdown thread pool
         self.thread_pool.shutdown(wait=True)
+
+
