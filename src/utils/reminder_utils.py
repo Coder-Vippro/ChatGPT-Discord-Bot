@@ -3,6 +3,8 @@ import logging
 import discord
 from datetime import datetime, timedelta
 import pytz
+import time
+import tzlocal
 from typing import Dict, Any, List, Optional, Union
 
 class ReminderManager:
@@ -22,8 +24,14 @@ class ReminderManager:
         self.running = False
         self.check_task = None
         
+        # Get the server's local timezone
+        self.server_timezone = tzlocal.get_localzone()
+        
+        # Store user timezones (will be populated as users interact)
+        self.user_timezones = {}
+        
         # Log initial timezone info
-        logging.info(f"ReminderManager initialized, using system timezone")
+        logging.info(f"ReminderManager initialized, server timezone: {self.server_timezone}")
     
     def start(self):
         """Start periodic reminder check"""
@@ -52,8 +60,8 @@ class ReminderManager:
         Returns:
             Current datetime with timezone
         """
-        # Always get the current time and timezone directly from the system
-        return datetime.now().astimezone()
+        # Always get the current time with the server's timezone
+        return datetime.now(self.server_timezone)
     
     async def add_reminder(self, user_id: int, content: str, remind_at: datetime) -> Dict[str, Any]:
         """
@@ -70,12 +78,18 @@ class ReminderManager:
         try:
             now = self.get_current_time()
             
+            # Ensure remind_at has timezone info
+            if remind_at.tzinfo is None:
+                # Apply server timezone if no timezone is provided
+                remind_at = remind_at.replace(tzinfo=self.server_timezone)
+            
             reminder = {
                 "user_id": user_id,
                 "content": content,
                 "remind_at": remind_at,
                 "created_at": now,
-                "sent": False
+                "sent": False,
+                "user_timezone": self.user_timezones.get(user_id, str(self.server_timezone))
             }
             
             result = await self.db.reminders_collection.insert_one(reminder)
@@ -157,7 +171,7 @@ class ReminderManager:
         """Process due reminders and send notifications"""
         now = self.get_current_time()
         
-        # Find due reminders
+        # Find due reminders - convert now to UTC for MongoDB comparison
         cursor = self.db.reminders_collection.find({
             "remind_at": {"$lte": now},
             "sent": False
@@ -172,7 +186,22 @@ class ReminderManager:
                 user = await self.bot.fetch_user(user_id)
                 
                 if user:
-                    # Format reminder message
+                    # Format reminder message with user's timezone if available
+                    user_timezone = reminder.get("user_timezone", str(self.server_timezone))
+                    try:
+                        tz = pytz.timezone(user_timezone) if isinstance(user_timezone, str) else user_timezone
+                    except (pytz.exceptions.UnknownTimeZoneError, TypeError):
+                        tz = self.server_timezone
+                    
+                    # Format datetime in user's preferred timezone
+                    reminder_time = reminder["remind_at"]
+                    if reminder_time.tzinfo is not None:
+                        user_time = reminder_time.astimezone(tz)
+                    else:
+                        user_time = reminder_time.replace(tzinfo=self.server_timezone).astimezone(tz)
+                    
+                    current_time = now.astimezone(tz)
+                    
                     embed = discord.Embed(
                         title="📅 Reminder",
                         description=reminder["content"],
@@ -180,9 +209,13 @@ class ReminderManager:
                     )
                     embed.add_field(
                         name="Set on",
-                        value=reminder["created_at"].strftime("%Y-%m-%d %H:%M")
+                        value=reminder["created_at"].astimezone(tz).strftime("%Y-%m-%d %H:%M")
                     )
-                    embed.set_footer(text="Current time: " + now.strftime("%Y-%m-%d %H:%M"))
+                    embed.add_field(
+                        name="Your timezone",
+                        value=str(tz)
+                    )
+                    embed.set_footer(text="Current time: " + current_time.strftime("%Y-%m-%d %H:%M"))
                     
                     # Send reminder message with mention
                     try:
@@ -212,17 +245,71 @@ class ReminderManager:
         except Exception as e:
             logging.error(f"Error cleaning expired reminders: {str(e)}")
     
-    async def parse_time(self, time_str: str) -> Optional[datetime]:
+    async def set_user_timezone(self, user_id: int, timezone_str: str) -> bool:
         """
-        Parse a time string into a datetime object with the system's timezone
+        Set a user's timezone preference
+        
+        Args:
+            user_id: Discord user ID
+            timezone_str: Timezone string (e.g. "America/New_York", "Europe/London")
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Validate timezone string
+            try:
+                tz = pytz.timezone(timezone_str)
+                self.user_timezones[user_id] = timezone_str
+                logging.info(f"Set timezone for user {user_id} to {timezone_str}")
+                return True
+            except pytz.exceptions.UnknownTimeZoneError:
+                logging.warning(f"Invalid timezone: {timezone_str}")
+                return False
+        except Exception as e:
+            logging.error(f"Error setting user timezone: {str(e)}")
+            return False
+    
+    async def detect_user_timezone(self, user_id: int, guild_id: Optional[int] = None) -> str:
+        """
+        Try to detect a user's timezone 
+        
+        Args:
+            user_id: Discord user ID
+            guild_id: Optional guild ID to check location
+            
+        Returns:
+            Timezone string
+        """
+        # First check if we already have the user's timezone
+        if user_id in self.user_timezones:
+            return self.user_timezones[user_id]
+        
+        # Default to server timezone
+        return str(self.server_timezone)
+    
+    async def parse_time(self, time_str: str, user_id: Optional[int] = None) -> Optional[datetime]:
+        """
+        Parse a time string into a datetime object with timezone awareness
         
         Args:
             time_str: Time string (e.g., "30m", "2h", "1d", "tomorrow", "15:00")
+            user_id: Optional user ID to use their preferred timezone
             
         Returns:
             Datetime object or None if parsing fails
         """
-        now = self.get_current_time()
+        # Get appropriate timezone
+        if user_id and user_id in self.user_timezones:
+            try:
+                user_tz = pytz.timezone(self.user_timezones[user_id])
+            except pytz.exceptions.UnknownTimeZoneError:
+                user_tz = self.server_timezone
+        else:
+            user_tz = self.server_timezone
+            
+        # Get current time in user's timezone
+        now = datetime.now(user_tz)
         time_str = time_str.lower().strip()
         
         try:
@@ -245,7 +332,7 @@ class ReminderManager:
                 return target
                 
             # Handle relative time formats (30m, 2h, 1d)
-            if time_str[-1] in ['m', 'h', 'd']:
+            if len(time_str) >= 2 and time_str[-1] in ['m', 'h', 'd'] and time_str[:-1].isdigit():
                 value = int(time_str[:-1])
                 unit = time_str[-1]
                 
@@ -266,14 +353,14 @@ class ReminderManager:
                     logging.warning(f"Invalid time format: {time_str}")
                     return None
                     
-                # Create datetime for the specified time today
+                # Create datetime for the specified time today in user's timezone
                 target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 
                 # If the time has already passed today, schedule for tomorrow
                 if target <= now:
                     target += timedelta(days=1)
                     
-                logging.info(f"Parsed time '{time_str}' to {target} (System timezone: {now.tzinfo})")
+                logging.info(f"Parsed time '{time_str}' to {target} (User timezone: {user_tz})")
                 return target
                 
             return None

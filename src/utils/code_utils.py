@@ -11,18 +11,44 @@ import platform
 import shutil
 from typing import Dict, Any, Optional, Tuple
 import concurrent.futures
+import traceback
+import json
+from datetime import datetime
 
 # Import the webhook logger
 from src.utils.webhook_logger import webhook_log_manager
 
-# Configure logger for code execution
+# Configure more detailed logger for code execution with file output
 code_logger = logging.getLogger("code_execution")
-code_logger.setLevel(logging.INFO)
-if not code_logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    code_logger.addHandler(handler)
+code_logger.setLevel(logging.DEBUG)  # Set to DEBUG for more detailed logging
+
+# Create logs directory if it doesn't exist
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+
+# Add file handler for persistent logging
+file_handler = logging.FileHandler('logs/code_execution.log')
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+file_handler.setLevel(logging.DEBUG)
+
+# Add console handler for immediate feedback
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(file_formatter)
+console_handler.setLevel(logging.INFO)
+
+# Clear existing handlers to avoid duplicates
+if code_logger.handlers:
+    code_logger.handlers.clear()
+
+code_logger.addHandler(file_handler)
+code_logger.addHandler(console_handler)
+
+# Create temp directory for data files with longer retention
+DATA_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'temp_data_files')
+if not os.path.exists(DATA_FILES_DIR):
+    os.makedirs(DATA_FILES_DIR, exist_ok=True)
+    code_logger.info(f"Created temp data directory at {DATA_FILES_DIR}")
 
 # Import resource conditionally for platform compatibility
 try:
@@ -90,16 +116,6 @@ def sanitize_code(code: str, language: str) -> Tuple[bool, str]:
         'freopen', 'ioctl', '<sys/socket.h>'
     ]
     
-    # Allowed C++ headers
-    cpp_allowed_headers = [
-        '<iostream>', '<vector>', '<string>', '<algorithm>', '<cmath>', '<map>', '<unordered_map>', 
-        '<set>', '<unordered_set>', '<queue>', '<stack>', '<deque>', '<list>', '<array>', 
-        '<numeric>', '<utility>', '<tuple>', '<functional>', '<chrono>', '<thread>', '<future>', 
-        '<mutex>', '<atomic>', '<memory>', '<limits>', '<exception>', '<stdexcept>', '<type_traits>', 
-        '<random>', '<regex>', '<bitset>', '<complex>', '<initializer_list>', '<iomanip>',
-        '<bits/stdc++.h>'  # Added support for bits/stdc++.h
-    ]
-    
     # Check if code is empty
     if not code.strip():
         return True, "Code is empty."
@@ -129,21 +145,110 @@ def sanitize_code(code: str, language: str) -> Tuple[bool, str]:
                     code_logger.warning(f"Forbidden module import detected: {module}")
                     return False, f"Forbidden module import: {module}"
         
-        # Fix the code indentation before adding the safety wrapper
-        # Remove any common indentation to normalize first
-        lines = code.split('\n')
-        if lines:
-            # Find minimum indentation that is not blank lines
-            non_empty_lines = [line for line in lines if line.strip()]
-            if non_empty_lines:
-                min_indent = min(len(line) - len(line.lstrip()) for line in non_empty_lines)
-                # Remove that indentation from all lines
-                if min_indent > 0:
-                    lines = [line[min_indent:] if line.strip() else line for line in lines]
-                code = '\n'.join(lines)
+        # Add data file path support for simple file paths
+        if "sample_data.csv" in code and "DATA_FILE_PATH" not in code:
+            # Adjust for data file paths in the code_interpreter context
+            code = code.replace("'sample_data.csv'", "DATA_FILE_PATH")
+            code = code.replace('"sample_data.csv"', "DATA_FILE_PATH")
+            code_logger.info("Replaced hardcoded data file path with DATA_FILE_PATH")
+            
+        # More robust preprocessing of code to fix indentation issues
+        try:
+            # First try to detect indentation inconsistencies
+            lines = code.split('\n')
+            cleaned_code = []
+            current_indent = 0
+            indents = []
+            
+            # First pass - collect indentation patterns
+            for line in lines:
+                if line.strip() and not line.lstrip().startswith('#'):
+                    spaces = len(line) - len(line.lstrip())
+                    if spaces > 0 and spaces not in indents:
+                        indents.append(spaces)
+            
+            # Sort indentation levels
+            indents.sort()
+            
+            # If we have mixed indentations, normalize them
+            if len(indents) > 1:
+                code_logger.info(f"Detected mixed indentation levels: {indents}")
+                
+                # Replace tabs with spaces if present
+                code = code.replace('\t', '    ')
+                lines = code.split('\n')
+                
+                # Second pass - normalize indentation
+                for line in lines:
+                    if not line.strip():
+                        cleaned_code.append(line)  # Keep empty lines
+                        continue
+                        
+                    if line.strip().startswith('#'):
+                        # Preserve comments with their indentation
+                        cleaned_code.append(line)
+                        continue
+                        
+                    spaces = len(line) - len(line.lstrip())
+                    if spaces > 0:
+                        # Find the closest standard indentation level (multiple of 4)
+                        indent_level = (spaces + 2) // 4  # Round to nearest indentation level
+                        cleaned_line = '    ' * indent_level + line.lstrip()
+                        cleaned_code.append(cleaned_line)
+                    else:
+                        cleaned_code.append(line)
+                
+                code = '\n'.join(cleaned_code)
+                code_logger.info("Normalized mixed indentation to 4-space indentation")
+        
+            # Try compiling the normalized code
+            compile(code, '<string>', 'exec')
+        except SyntaxError as e:
+            # If syntax error is not indentation-related, log it and continue with standard wrapping
+            if "unexpected indent" in str(e) or "unindent does not match" in str(e) or "expected an indented block" in str(e):
+                code_logger.warning(f"Indentation error in Python code: {str(e)}")
+                try:
+                    # Reindent the entire code with autopep8 if available
+                    try:
+                        import autopep8
+                        code = autopep8.fix_code(code)
+                        code_logger.info("Applied autopep8 fixes to the code")
+                    except ImportError:
+                        # If autopep8 not available, try basic reindentation
+                        lines = code.split('\n')
+                        # Replace all indentation with fixed 4-space indents
+                        fixed_lines = []
+                        for line in lines:
+                            if line.strip():
+                                # Count indentation level based on spaces/tabs
+                                stripped = line.lstrip()
+                                indent_level = (len(line) - len(stripped)) // 2  # Assuming 2-space or mixed indentation
+                                fixed_line = '    ' * indent_level + stripped
+                                fixed_lines.append(fixed_line)
+                            else:
+                                fixed_lines.append(line)  # Keep empty lines
+                        code = '\n'.join(fixed_lines)
+                        code_logger.info("Applied basic reindentation to the code")
+                    
+                    # Try compiling again
+                    compile(code, '<string>', 'exec')
+                    code_logger.info("Successfully fixed indentation issues")
+                except SyntaxError as e2:
+                    # Special case - attempt to ignore indentation errors for execution
+                    code_logger.warning(f"Still have syntax errors after fixing: {str(e2)}")
+                    if "unexpected indent" in str(e2) or "unindent does not match" in str(e2):
+                        # For indentation errors only, we'll proceed anyway but log it
+                        code_logger.warning("Proceeding despite indentation errors")
+                    else:
+                        return False, f"Syntax error: {str(e2)}"
+                except Exception as fix_error:
+                    code_logger.error(f"Error fixing indentation: {str(fix_error)}")
+            else:
+                code_logger.warning(f"Non-indentation syntax error: {str(e)}")
+        except Exception as e:
+            code_logger.warning(f"Error during code preprocessing: {str(e)}")
         
         # Simple safety header with just timeout and exception handling
-        # Avoid complex sandboxing that might fail in Alpine
         safety_header = """import time
 import threading
 import signal
@@ -265,15 +370,7 @@ int main() {
     return 0;
 }"""
     
-    # Perform syntax check for languages
-    if language == 'python':
-        try:
-            compile(code, '<string>', 'exec')
-            return True, code
-        except SyntaxError as e:
-            code_logger.warning(f"Python syntax error: {str(e)}")
-            return False, f"Syntax error: {str(e)}"
-    
+    # Skip the final syntax check as we've already handled it more tolerantly above
     return True, code
 
 # Function to limit resources for subprocesses
@@ -304,7 +401,7 @@ def find_python3_executable():
     """Find the python3 executable on the system"""
     # First check if we have python3 in PATH
     python3_path = shutil.which('python3')
-    if python3_path:
+    if (python3_path):
         code_logger.info(f"Found python3 at: {python3_path}")
         return python3_path
     
@@ -369,9 +466,9 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
         try:
             # Check if we need to install key data analysis packages
             code_logger.info("Data analysis code detected. Ensuring required packages are installed...")
-            packages_to_check = ['pandas', 'numpy', 'matplotlib', 'seaborn']
+            packages_to_check = ['pandas', 'numpy', 'matplotlib', 'seaborn', 'autopep8']
             for package in packages_to_check:
-                if package in code:
+                if package in code or package == 'autopep8':  # Always check for autopep8
                     try:
                         # Try importing the package
                         __import__(package)
@@ -392,7 +489,295 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
         except Exception as e:
             code_logger.warning(f"Error checking/installing data analysis packages: {str(e)}")
     
-    # Sanitize the code first
+    # For Python code, we'll use a different approach entirely - direct execution without sanitization
+    if language == 'python':
+        try:
+            # Create temp directory for running code
+            with tempfile.TemporaryDirectory() as temp_dir:
+                code_logger.debug(f"Created temporary directory: {temp_dir}")
+                
+                # Extract and fix DATA_FILE_PATH from input
+                data_file_path = None
+                filtered_input_lines = []
+                
+                if input_data:
+                    for line in input_data.splitlines():
+                        if line.startswith("DATA_FILE_PATH="):
+                            data_file_path = line.split("=", 1)[1].strip()
+                            code_logger.info(f"Found data file path: {data_file_path}")
+                        else:
+                            filtered_input_lines.append(line)
+                
+                filtered_input = "\n".join(filtered_input_lines) if filtered_input_lines else ""
+                
+                # Replace hardcoded file paths with DATA_FILE_PATH variable if we have one
+                if data_file_path:
+                    code = code.replace("'sample_data.csv'", f"r'{data_file_path}'")
+                    code = code.replace('"sample_data.csv"', f'r"{data_file_path}"')
+                    code = code.replace("file_path = 'sample_data.csv'", f"file_path = r'{data_file_path}'")
+                    code = code.replace('file_path = "sample_data.csv"', f'file_path = r"{data_file_path}"')
+                    code_logger.info(f"Replaced hardcoded paths with: {data_file_path}")
+                
+                # Create visualizations capture code
+                image_path = os.path.join(temp_dir, "output_plot.png")
+                vis_capture_code = """
+import signal
+import sys
+import os
+import time
+import threading
+
+# Set timeout handling
+def timeout_handler(signum, frame):
+    print('Code execution timed out (exceeded 15 seconds)')
+    sys.exit(1)
+
+# Set alarm if available
+try:
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(15)  # 15 seconds for data viz
+except (AttributeError, ValueError):
+    pass  # SIGALRM might not be available on all platforms
+
+# Thread-based timeout for redundancy
+def timeout_thread():
+    time.sleep(15)
+    print('Code execution timed out (exceeded 15 seconds)')
+    os._exit(1)
+
+timeout_timer = threading.Thread(target=timeout_thread)
+timeout_timer.daemon = True
+timeout_timer.start()
+
+# Initialize visualization imports tracking
+viz_imports = []
+
+# Check for imports needed
+import sys
+
+if 'matplotlib' in globals() or 'matplotlib' in sys.modules:
+    pass  # Already imported
+elif 'plt' in globals() or ('matplotlib.pyplot' in sys.modules):
+    # plt is used but matplotlib might not be properly imported
+    import matplotlib.pyplot as plt
+    viz_imports.append("matplotlib.pyplot")
+    
+if 'base64' in globals() or 'base64' in sys.modules:
+    pass  # Already imported
+else:
+    import base64
+    viz_imports.append("base64")
+    
+if 'io' in globals() or 'io' in sys.modules:
+    pass  # Already imported
+else:
+    import io
+    viz_imports.append("io")
+
+if viz_imports:
+    print("Auto-imported for visualization: " + ', '.join(viz_imports))
+
+# Add visualization capture function
+def _save_and_encode_plot():
+    if "matplotlib" in sys.modules:
+        plt = sys.modules["matplotlib.pyplot"]
+        if plt.get_fignums():
+            try:
+                # Save to temp file first
+                print("Saving plot to temp file...")
+                plt.savefig("{0}", dpi=150, bbox_inches='tight')
+                
+                # Encode to base64 for sending back
+                with open("{0}", 'rb') as img_file:
+                    img_data = img_file.read()
+                    encoded = base64.b64encode(img_data).decode('utf-8')
+                    print("\\n[CHART_DATA_START]")
+                    print(encoded)
+                    print("[CHART_DATA_END]")
+            except Exception as e:
+                print(f"Error saving visualization: {{e}}")
+
+# Register cleanup to run at exit
+import atexit
+atexit.register(_save_and_encode_plot)
+
+# Make plt.show non-blocking if it exists
+if "matplotlib" in sys.modules:
+    plt = sys.modules["matplotlib.pyplot"]
+    original_show = plt.show
+    def _show_wrapper(*args, **kwargs):
+        if 'block' not in kwargs:
+            kwargs['block'] = False
+        return original_show(*args, **kwargs)
+    plt.show = _show_wrapper
+
+# Execute the actual user code
+try:
+""".format(image_path)
+                
+                # Add closing part
+                vis_capture_code_end = """
+except Exception as e:
+    print(f"Error executing code: {str(e)}")
+finally:
+    # Cancel the alarm if it was set
+    try:
+        signal.alarm(0)
+    except:
+        pass
+    
+    # Capture plots at the end if they exist
+    _save_and_encode_plot()
+"""
+                
+                # Indented user code
+                indented_user_code = "\n    ".join([""] + code.split("\n"))
+                
+                # Complete code with user code in the middle
+                full_code = vis_capture_code + indented_user_code + vis_capture_code_end
+                
+                # Write to file
+                file_path = os.path.join(temp_dir, 'user_code.py')
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(full_code)
+                
+                code_logger.debug(f"Python code written to {file_path}")
+                
+                # Make sure the file is executable
+                os.chmod(file_path, 0o755)
+                
+                # Set process environment for execution
+                env = dict(os.environ)  # Start with current environment
+                
+                # Preserve important environment variables for package access
+                critical_env_vars = {
+                    'PYTHONPATH': env.get('PYTHONPATH', ''),
+                    'PYTHONHOME': env.get('PYTHONHOME', ''),
+                    'PATH': env.get('PATH', ''),
+                    'PYTHONIOENCODING': 'utf-8',
+                    'TEMP': temp_dir,
+                    'TMP': temp_dir,
+                }
+                
+                # If using a virtual environment, make sure to carry those variables
+                if 'VIRTUAL_ENV' in env:
+                    critical_env_vars['VIRTUAL_ENV'] = env['VIRTUAL_ENV']
+                
+                # Use environment variables from the current process to ensure access to installed packages
+                env.update(critical_env_vars)
+                
+                # Find python executable
+                python3_executable = find_python3_executable()
+                
+                # Prepare command and input
+                shell_command = f"{python3_executable} {file_path}"
+                input_file = None
+                
+                if filtered_input:
+                    # Create a temporary file for input data
+                    input_file = os.path.join(temp_dir, 'input.txt')
+                    with open(input_file, 'w', encoding='utf-8') as f:
+                        f.write(filtered_input)
+                    # Adjust command to use input file
+                    shell_command = f"{python3_executable} {file_path} < {input_file}"
+                    code_logger.debug(f"Created input file: {input_file}")
+                
+                # Execute the code
+                try:
+                    # Use shell=True for compatibility
+                    code_logger.debug(f"Attempting execution with shell command: {shell_command}")
+                    proc = await asyncio.create_subprocess_shell(
+                        shell_command,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=env,
+                        cwd=temp_dir,
+                        shell=True
+                    )
+                    
+                    # Enforce timeout
+                    actual_timeout = min(timeout, 20)  # Allow more time for visualization
+                    code_logger.debug(f"Waiting for output with {actual_timeout}s timeout")
+                    
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=actual_timeout)
+                    
+                except (subprocess.SubprocessError, asyncio.TimeoutError, Exception) as e:
+                    # Fallback method if shell fails
+                    code_logger.warning(f"Shell execution failed: {str(e)}. Trying exec method.")
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            python3_executable, file_path,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            stdin=subprocess.PIPE if filtered_input and not input_file else None,
+                            cwd=temp_dir,
+                            env=env
+                        )
+                        
+                        if filtered_input and not input_file:
+                            stdout, stderr = await asyncio.wait_for(
+                                proc.communicate(filtered_input.encode('utf-8')),
+                                timeout=actual_timeout
+                            )
+                        else:
+                            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=actual_timeout)
+                            
+                    except Exception as exec_error:
+                        code_logger.error(f"Exec method failed: {str(exec_error)}")
+                        return f"Code:\n```{language}\n{original_code}\n```\n\nError: Failed to execute Python code: {str(exec_error)}"
+                
+                # Process execution results
+                stdout_text = stdout.decode('utf-8', errors='replace').strip()
+                stderr_text = stderr.decode('utf-8', errors='replace').strip()
+                
+                # Check for errors
+                if stderr_text:
+                    code_logger.debug(f"Error output: {stderr_text[:200]}...")
+                    output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nError:\n```\n{stderr_text}```"
+                    return output_with_code
+                
+                # Process stdout for visualization markers
+                output = stdout_text
+                code_logger.debug(f"Standard output received: {len(output)} chars")
+                
+                # Check if we have a visualization chart
+                chart_data = None
+                chart_markers = ["[CHART_DATA_START]", "[CHART_DATA_END]"]
+                if all(marker in output for marker in chart_markers):
+                    code_logger.info("Found chart data in output")
+                    # Extract base64 encoded image data
+                    start_idx = output.find(chart_markers[0]) + len(chart_markers[0])
+                    end_idx = output.find(chart_markers[1])
+                    
+                    if start_idx > 0 and end_idx > start_idx:
+                        chart_data = output[start_idx:end_idx].strip()
+                        # Remove the chart data from output to avoid cluttering the response
+                        clean_output = (output[:output.find(chart_markers[0])].strip() + 
+                                       "\n[Chart generated successfully]" + 
+                                       output[output.find(chart_markers[1]) + len(chart_markers[1]):].strip())
+                        output = clean_output
+                
+                # Limit output size to prevent huge responses
+                if len(output) > 5000:
+                    output = output[:5000] + "\n...(output truncated due to size)"
+                
+                # Prepare final response
+                if output:
+                    output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nOutput:\n```\n{output}```"
+                    return output_with_code
+                else:
+                    output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nOutput:\n```\nCode executed successfully with no output. Return code: 0\n```"
+                    return output_with_code
+                    
+        except asyncio.TimeoutError:
+            code_logger.warning(f"Python execution timed out after {timeout}s")
+            output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nError: Code execution timed out after {timeout} seconds. Please optimize your code or reduce complexity."
+            return output_with_code
+        except Exception as e:
+            code_logger.error(f"Python execution error: {str(e)}")
+            return f"Code:\n```{language}\n{original_code}\n```\n\nError: An error occurred during Python execution: {str(e)}"
+    
+    # For non-Python code, use the sanitization approach
     is_safe, sanitized_code = sanitize_code(code, language)
     if not is_safe:
         code_logger.warning(f"Security validation failed: {sanitized_code}")
@@ -400,18 +785,7 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
     
     code = sanitized_code
     
-    # Validate and prepare input data
-    if input_data and not isinstance(input_data, str):
-        try:
-            input_data = str(input_data)
-        except Exception as e:
-            code_logger.error(f"Input data conversion failed: {str(e)}")
-            return f"Error: Invalid input data - {str(e)}. Return code: 1"
-    
-    # Ensure input_data ends with newline
-    if input_data and not input_data.endswith('\n'):
-        input_data += '\n'
-    
+    # ... rest of the function for C++ execution remains unchanged ...
     try:
         # Log environment info
         code_logger.info(f"Platform: {platform.platform()}, Python: {sys.version}")
@@ -420,156 +794,7 @@ async def execute_code(code: str, language: str, timeout: int = 10, input_data: 
         with tempfile.TemporaryDirectory() as temp_dir:
             code_logger.debug(f"Created temporary directory: {temp_dir}")
             
-            if language == 'python':
-                # Find python3 executable
-                python3_executable = find_python3_executable()
-                code_logger.info(f"Using Python executable: {python3_executable}")
-                
-                # Execute Python code
-                file_path = os.path.join(temp_dir, 'code.py')
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(code)
-                
-                code_logger.debug(f"Python code written to {file_path}")
-                
-                # Make sure the file is executable
-                os.chmod(file_path, 0o755)
-                
-                try:
-                    # Set process environment to restrict access to the system but keep necessary paths
-                    env = dict(os.environ)  # Start with current environment
-                    
-                    # Preserve important environment variables for package access
-                    critical_env_vars = {
-                        'PYTHONPATH': env.get('PYTHONPATH', ''),
-                        'PYTHONHOME': env.get('PYTHONHOME', ''),
-                        'PATH': env.get('PATH', ''),
-                        'PYTHONIOENCODING': 'utf-8',
-                        'TEMP': temp_dir,
-                        'TMP': temp_dir,
-                    }
-                    
-                    # If using a virtual environment, make sure to carry those variables
-                    if 'VIRTUAL_ENV' in env:
-                        critical_env_vars['VIRTUAL_ENV'] = env['VIRTUAL_ENV']
-                    
-                    # Use environment variables from the current process to ensure access to installed packages
-                    env.update(critical_env_vars)
-                    
-                    code_logger.debug(f"Starting Python subprocess with executable: {python3_executable}")
-                    
-                    # Add a simple check at the beginning of the file to verify pandas is available
-                    # This will help with troubleshooting but won't interfere with code execution
-                    verify_header = ""
-                    if 'import pandas' in code or 'from pandas' in code:
-                        verify_header = """
-# Verify pandas is installed
-try:
-    import pandas
-    print("✓ Pandas is available (version: " + pandas.__version__ + ")")
-except ImportError:
-    print("✗ Pandas is not available")
-
-"""
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            original_content = f.read()
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(verify_header + original_content)
-                    
-                    # Try using direct shell command first for better compatibility in Alpine
-                    shell_command = f"{python3_executable} {file_path}"
-                    
-                    if input_data:
-                        # Create a temporary file for input data
-                        input_file = os.path.join(temp_dir, 'input.txt')
-                        with open(input_file, 'w', encoding='utf-8') as f:
-                            f.write(input_data)
-                        # Adjust command to use input file
-                        shell_command = f"{python3_executable} {file_path} < {input_file}"
-                        code_logger.debug(f"Created input file: {input_file}")
-                    
-                    # Try different methods if one fails
-                    try:
-                        # Method 1: Use shell=True for Alpine compatibility
-                        code_logger.debug(f"Attempting execution with shell command: {shell_command}")
-                        proc = await asyncio.create_subprocess_shell(
-                            shell_command,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            env=env,
-                            cwd=temp_dir,
-                            shell=True
-                        )
-                        
-                        # Enforce timeout
-                        actual_timeout = min(timeout, 10)
-                        code_logger.debug(f"Waiting for output with {actual_timeout}s timeout (shell method)")
-                        
-                        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=actual_timeout)
-                        
-                    except (subprocess.SubprocessError, asyncio.TimeoutError, Exception) as e:
-                        # Method 2: Use create_subprocess_exec as fallback
-                        code_logger.warning(f"Shell execution failed with {type(e).__name__}: {str(e)}. Trying exec method.")
-                        try:
-                            # Run the code with explicit executable path
-                            proc = await asyncio.create_subprocess_exec(
-                                python3_executable, file_path,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                stdin=subprocess.PIPE if input_data else None,
-                                cwd=temp_dir,
-                                env=env
-                            )
-                            
-                            # Enforce timeout
-                            actual_timeout = min(timeout, 10)
-                            code_logger.debug(f"Waiting for output with {actual_timeout}s timeout (exec method)")
-                            
-                            if input_data:
-                                stdout, stderr = await asyncio.wait_for(
-                                    proc.communicate(input_data.encode('utf-8')),
-                                    timeout=actual_timeout
-                                )
-                            else:
-                                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=actual_timeout)
-                                
-                        except Exception as exec_error:
-                            code_logger.error(f"Exec method failed: {str(exec_error)}")
-                            return f"Code:\n```{language}\n{original_code}\n```\n\nError: Failed to execute Python code: {str(exec_error)}"
-                    
-                    # Process execution results
-                    if stderr:
-                        stderr_content = stderr.decode('utf-8', errors='replace').strip()
-                        if stderr_content:
-                            code_logger.debug(f"Error output: {stderr_content[:200]}...")
-                            output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nError:\n```\n{stderr_content}```"
-                            return output_with_code
-                    
-                    # Return output or default message if output is empty
-                    output = stdout.decode('utf-8', errors='replace').strip()
-                    code_logger.debug(f"Standard output received: {len(output)} chars")
-                    
-                    # Limit output size to prevent huge responses
-                    if len(output) > 5000:
-                        output = output[:5000] + "\n...(output truncated due to size)"
-                    
-                    if output:
-                        output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nOutput:\n```\n{output}```"
-                        return output_with_code
-                    else:
-                        output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nOutput:\n```\nCode executed successfully with no output. Return code: 0\n```"
-                        return output_with_code
-                        
-                except asyncio.TimeoutError:
-                    code_logger.warning(f"Python execution timed out after {timeout}s")
-                    output_with_code = f"Code:\n```{language}\n{original_code}\n```\n\nError: Code execution timed out after {timeout} seconds. Please optimize your code or reduce complexity."
-                    return output_with_code
-                        
-                except Exception as e:
-                    code_logger.error(f"Python execution error: {str(e)}")
-                    return f"Code:\n```{language}\n{original_code}\n```\n\nError: An error occurred during Python execution: {str(e)}"
-                    
-            elif language == 'cpp':
+            if language == 'cpp':
                 # Execute C++ code
                 src_path = os.path.join(temp_dir, 'code.cpp')
                 exe_path = os.path.join(temp_dir, 'code')

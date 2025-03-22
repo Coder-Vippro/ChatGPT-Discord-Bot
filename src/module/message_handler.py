@@ -12,6 +12,7 @@ import os
 import sys
 import subprocess
 import base64
+import traceback
 from datetime import datetime, timedelta
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
@@ -39,20 +40,6 @@ DATA_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 # Storage for user data files and charts
 user_data_files = {}
 user_charts = {}
-
-# Get the Python executable to use for installations
-# First check if using a virtual environment
-PYTHON_EXECUTABLE = os.environ.get('VIRTUAL_ENV', None)
-if PYTHON_EXECUTABLE:
-    if os.name == 'nt':  # Windows
-        PYTHON_EXECUTABLE = os.path.join(PYTHON_EXECUTABLE, 'Scripts', 'python.exe')
-    else:  # Unix/Linux/Mac
-        PYTHON_EXECUTABLE = os.path.join(PYTHON_EXECUTABLE, 'bin', 'python')
-else:
-    # Fallback to sys.executable if not in a virtual environment
-    PYTHON_EXECUTABLE = sys.executable
-
-logging.info(f"Using Python executable: {PYTHON_EXECUTABLE}")
 
 # Try to import data analysis libraries early
 try:
@@ -122,58 +109,14 @@ class MessageHandler:
         try:
             logging.info("Attempting to install data analysis packages...")
             packages = ["pandas", "numpy", "matplotlib", "seaborn", "openpyxl"]
-            
-            # Log the Python executable being used
-            logging.info(f"Using Python executable for package installation: {PYTHON_EXECUTABLE}")
-            
-            # First try using pip directly through the Python executable
             for package in packages:
                 try:
-                    # Use the appropriate Python executable with pip
-                    result = subprocess.run(
-                        [PYTHON_EXECUTABLE, "-m", "pip", "install", package],
-                        capture_output=True,
-                        text=True,
-                        check=False
-                    )
-                    
-                    if result.returncode != 0:
-                        logging.warning(f"Failed to install {package}: {result.stderr}")
-                        # If we're in a virtualenv and that failed, try using pip directly
-                        if os.environ.get('VIRTUAL_ENV'):
-                            pip_path = os.path.join(os.environ.get('VIRTUAL_ENV'), 
-                                                   'Scripts' if os.name == 'nt' else 'bin', 
-                                                   'pip')
-                            pip_result = subprocess.run(
-                                [pip_path, "install", package],
-                                capture_output=True,
-                                text=True,
-                                check=False
-                            )
-                            if pip_result.returncode == 0:
-                                logging.info(f"Successfully installed {package} using virtualenv pip")
-                            else:
-                                logging.error(f"Failed to install {package} using virtualenv pip: {pip_result.stderr}")
-                    else:
-                        logging.info(f"Successfully installed {package}")
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+                    logging.info(f"Successfully installed {package}")
                 except Exception as e:
-                    logging.error(f"Error installing {package}: {str(e)}")
+                    logging.error(f"Failed to install {package}: {str(e)}")
         except Exception as e:
-            logging.error(f"Error in package installation process: {str(e)}")
-
-        # Try to import the packages again
-        try:
-            import pandas as pd
-            import numpy as np
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-            import seaborn as sns
-            logging.info(f"Successfully imported pandas {pd.__version__} after installation")
-            global PANDAS_AVAILABLE
-            PANDAS_AVAILABLE = True
-        except ImportError as e:
-            logging.error(f"Still unable to import data libraries after installation: {str(e)}")
+            logging.error(f"Error installing packages: {str(e)}")
             
     async def _setup_aiohttp_session(self):
         """Create a reusable aiohttp session for better performance"""
@@ -232,6 +175,9 @@ class MessageHandler:
                 user_id = uid
                 break
         
+        # Get the data files directory from code_utils
+        from src.utils.code_utils import DATA_FILES_DIR
+        
         # Handle data file if specified in the code_interpreter call
         if file_path:
             file_bytes = None
@@ -241,16 +187,38 @@ class MessageHandler:
             if not file_bytes:
                 return json.dumps({"error": "No data file found. Please upload a CSV or Excel file first."})
             
-            # Create a temporary file for the code to use
-            temp_file_path = f"temp_data_{user_id}_{int(time.time())}.csv"
-            with open(temp_file_path, "wb") as f:
-                f.write(file_bytes)
+            # Create a persistent temporary file for the code to use
+            filename = user_data_files[user_id].get("filename", "data.csv")
+            file_extension = os.path.splitext(filename)[1]
+            temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
+            
+            # Save the file with better error handling
+            try:
+                with open(temp_file_path, "wb") as f:
+                    f.write(file_bytes)
+                logging.info(f"Saved data file for analysis at {temp_file_path}")
                 
-            # Include path to data file in input_data
-            if input_data:
-                input_data += f"\nDATA_FILE_PATH={temp_file_path}"
-            else:
-                input_data = f"DATA_FILE_PATH={temp_file_path}"
+                # Also log the absolute path for debugging
+                logging.info(f"Absolute data file path: {os.path.abspath(temp_file_path)}")
+                
+                # Log file size and existence
+                file_size = os.path.getsize(temp_file_path)
+                logging.info(f"Data file size: {file_size} bytes, exists: {os.path.exists(temp_file_path)}")
+                
+                # Include path to data file in input_data
+                if input_data:
+                    input_data += f"\nDATA_FILE_PATH={temp_file_path}"
+                else:
+                    input_data = f"DATA_FILE_PATH={temp_file_path}"
+                
+                # Also log the first few bytes of the file for debugging
+                if file_size > 0:
+                    with open(temp_file_path, "rb") as f:
+                        first_bytes = f.read(min(100, file_size))
+                        logging.info(f"First bytes of data file: {first_bytes}")
+            except Exception as e:
+                logging.error(f"Error saving data file: {str(e)}")
+                return json.dumps({"error": f"Failed to save data file: {str(e)}"})
         
         # Check if visualization code is included
         has_visualization = False
@@ -260,6 +228,33 @@ class MessageHandler:
                 "plt.savefig", "plt.show", "BytesIO", 
                 "plotly", "bokeh", "altair"
             ])
+            
+            # Add explicit file access code if a data file is present
+            if file_path and "DATA_FILE_PATH" in input_data and "pandas" in code:
+                # Add check to see if the data file was read correctly
+                file_check_code = """
+# Check and log data file accessibility
+try:
+    data_file_path = globals().get('DATA_FILE_PATH', None)
+    if data_file_path:
+        print(f"Attempting to access data file at: {data_file_path}")
+        # Check if file exists
+        import os
+        if os.path.exists(data_file_path):
+            print(f"Data file exists, size: {os.path.getsize(data_file_path)} bytes")
+            # Try to read a few bytes
+            with open(data_file_path, 'rb') as f:
+                first_bytes = f.read(100)
+                print(f"First bytes: {first_bytes}")
+        else:
+            print(f"ERROR: Data file not found at {data_file_path}")
+    else:
+        print("ERROR: No data file path provided")
+except Exception as e:
+    print(f"Error checking data file: {str(e)}")
+"""
+                # Prepend the check to the user's code
+                code = file_check_code + "\n" + code
             
             # If we have visualization, make sure code produces image bytes
             if has_visualization and "BytesIO" not in code:
@@ -292,15 +287,18 @@ except Exception as e:
                 indented_code = "\n".join("    " + line for line in code.split("\n"))
                 code = visualization_wrapper.format(indented_code)
         
+        # Log the code and inputs before execution for debugging
+        logging.debug(f"Executing code with input_data: {input_data[:100]}...")
+        
         # Execute the code
         result = await execute_code(code, language, input_data=input_data)
         
-        # Clean up temporary data file if it was created
-        if file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except Exception as e:
-                logging.error(f"Error removing temporary data file: {str(e)}")
+        # Log the execution result for debugging
+        if result:
+            logging.debug(f"Code execution result: {result[:500]}...")
+        
+        # We no longer delete the file immediately to allow for longer access
+        # Data files will be cleaned up after 23 hours by the chart cleanup task
         
         # Check for chart data in output
         chart_image = None
@@ -461,16 +459,6 @@ except Exception as e:
                 "timestamp": datetime.now().timestamp()
             }
             
-            # Create a temporary file for analysis
-            file_ext = os.path.splitext(attachment.filename)[1].lower()
-            temp_file_path = f"temp_data_{user_id}_{int(time.time())}{file_ext}"
-            
-            # Write the file to disk
-            with open(temp_file_path, "wb") as f:
-                f.write(file_bytes)
-                
-            logging.info(f"Saved data file to: {temp_file_path}")
-            
             # Try to import required packages
             try:
                 import pandas as pd
@@ -480,12 +468,13 @@ except Exception as e:
                 import matplotlib.pyplot as plt
                 import seaborn as sns
                 
-                # Read the data file directly from disk
+                # Read the data file
+                file_obj = io.BytesIO(file_bytes)
                 try:
-                    if file_ext == '.csv':
-                        df = pd.read_csv(temp_file_path)
-                    elif file_ext in ['.xlsx', '.xls']:
-                        df = pd.read_excel(temp_file_path)
+                    if attachment.filename.lower().endswith('.csv'):
+                        df = pd.read_csv(file_obj)
+                    elif attachment.filename.lower().endswith(('.xlsx', '.xls')):
+                        df = pd.read_excel(file_obj)
                     
                     # Basic data summary
                     rows, cols = df.shape
@@ -511,7 +500,6 @@ except Exception as e:
                     
                     # Send data summary
                     await message.channel.send(f"📊 Data File Analysis:\n```\n{data_summary[:1900]}```")
-                    
                 except Exception as analysis_error:
                     error_msg = f"Error analyzing data file: {str(analysis_error)}"
                     logging.error(error_msg)
@@ -524,46 +512,23 @@ except Exception as e:
                 
                 # Install required packages
                 try:
-                    # Log which Python executable we're using
-                    await message.channel.send(f"Using Python executable: {PYTHON_EXECUTABLE}")
-                    
                     for pkg in ["pandas", "numpy", "matplotlib", "seaborn", "openpyxl"]:
                         result = subprocess.run(
-                            [PYTHON_EXECUTABLE, "-m", "pip", "install", pkg],
+                            [sys.executable, "-m", "pip", "install", pkg],
                             capture_output=True,
                             text=True,
                             check=False
                         )
-                        
                         if result.returncode != 0:
-                            error_msg = f"Failed to install {pkg}: {result.stderr}"
-                            logging.warning(error_msg)
-                            await message.channel.send(f"⚠️ Warning: {error_msg}")
+                            logging.warning(f"Failed to install {pkg}: {result.stderr}")
                         else:
                             logging.info(f"Successfully installed {pkg}")
-                            await message.channel.send(f"✅ Installed {pkg}")
                     
                     await message.channel.send(f"📊 Data File Analysis:\nPackages installed. Please try again.")
-                    
-                    # Clean up temp file
-                    try:
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                    except Exception as cleanup_error:
-                        logging.error(f"Error removing temp file: {str(cleanup_error)}")
-                        
                     return
                 except Exception as e:
                     logging.error(f"Error installing data analysis packages: {str(e)}")
                     await message.channel.send(f"📊 Data File Analysis:\nError: Failed to install required packages. {str(e)}")
-                    
-                    # Clean up temp file
-                    try:
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                    except Exception as cleanup_error:
-                        logging.error(f"Error removing temp file: {str(cleanup_error)}")
-                        
                     return
             
             # Now use the AI to generate a response with chart creation hint
@@ -571,13 +536,6 @@ except Exception as e:
             
             # Call API for analysis
             await self._process_text_message(message, user_id, ai_prompt, model, history, start_time)
-            
-            # Clean up temp file
-            try:
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-            except Exception as cleanup_error:
-                logging.error(f"Error removing temp file: {str(cleanup_error)}")
             
         except Exception as e:
             error_msg = f"Error processing data file: {str(e)}"
@@ -652,11 +610,19 @@ except Exception as e:
                                     # Try to decode as UTF-8 first
                                     file_content = file_bytes.decode('utf-8')
                                 except UnicodeDecodeError:
-                                    # Fallback to other common encodings
+                                    # Try UTF-8 with error replacement
                                     try:
-                                        file_content = file_bytes.decode('latin-1')
-                                    except:
                                         file_content = file_bytes.decode('utf-8', errors='replace')
+                                        logging.info(f"Decoded {attachment.filename} with UTF-8 (errors replaced)")
+                                    except:
+                                        # Fallback to latin-1 which can decode any byte sequence
+                                        try:
+                                            file_content = file_bytes.decode('latin-1')
+                                            logging.info(f"Decoded {attachment.filename} with latin-1")
+                                        except:
+                                            # Final fallback
+                                            file_content = file_bytes.decode('utf-8', errors='ignore')
+                                            logging.warning(f"Decoded {attachment.filename} with UTF-8 (errors ignored)")
                                 
                                 # Add formatted text to extracted contents
                                 extracted_text = f"\n\n--- Content of {attachment.filename} ---\n{file_content}\n--- End of {attachment.filename} ---\n\n"
@@ -1010,8 +976,8 @@ except Exception as e:
             if not user_id:
                 return json.dumps({"error": "Could not identify user"})
                 
-            # Parse time
-            remind_at = await self.reminder_manager.parse_time(time_str)
+            # Parse time using user's timezone if available
+            remind_at = await self.reminder_manager.parse_time(time_str, user_id)
             
             if not remind_at:
                 return json.dumps({
@@ -1021,10 +987,14 @@ except Exception as e:
             # Save reminder
             reminder = await self.reminder_manager.add_reminder(user_id, content, remind_at)
             
+            # Get timezone info for the response
+            user_tz = await self.reminder_manager.detect_user_timezone(user_id)
+            
             return json.dumps({
                 "success": True,
                 "content": content,
-                "time": remind_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "time": remind_at.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                "timezone": user_tz,
                 "reminder_id": str(reminder["_id"])
             })
             
@@ -1083,7 +1053,7 @@ except Exception as e:
         """Download an image from a URL with error handling"""
         try:
             async with session.get(url) as resp:
-                if (resp.status == 200):
+                if resp.status == 200:
                     return await resp.read()
                 else:
                     logging.warning(f"Failed to download image, status: {resp.status}")
@@ -1249,21 +1219,36 @@ except Exception as e:
             if expired_keys:
                 logging.info(f"Cleaned up {len(expired_keys)} expired charts")
                 
-            # Clean up expired data files
+            # Clean up expired data files from memory
             expired_users = []
             for user_id, data_info in user_data_files.items():
                 if datetime.now().timestamp() - data_info.get("timestamp", 0) > max_age_hours * 3600:
                     expired_users.append(user_id)
             
-            # Remove expired data files
+            # Remove expired data files from memory
             for user_id in expired_users:
                 del user_data_files[user_id]
                 
             if expired_users:
-                logging.info(f"Cleaned up {len(expired_users)} expired data files")
+                logging.info(f"Cleaned up {len(expired_users)} expired data files from memory")
+                
+            # Also clean up physical temporary data files
+            from src.utils.code_utils import DATA_FILES_DIR
+            if os.path.exists(DATA_FILES_DIR):
+                now = time.time()
+                for filename in os.listdir(DATA_FILES_DIR):
+                    file_path = os.path.join(DATA_FILES_DIR, filename)
+                    try:
+                        # Check if the file is older than max_age_hours
+                        if os.path.isfile(file_path) and os.path.getmtime(file_path) < now - (max_age_hours * 3600):
+                            os.remove(file_path)
+                            logging.info(f"Removed expired temporary data file: {file_path}")
+                    except Exception as file_error:
+                        logging.error(f"Error removing temporary file {file_path}: {str(file_error)}")
                 
         except Exception as e:
-            logging.error(f"Error cleaning up charts: {str(e)}")
+            logging.error(f"Error cleaning up charts and data files: {str(e)}")
+            logging.error(traceback.format_exc())
             
     async def close(self):
         """Clean up resources when closing the bot"""

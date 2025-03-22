@@ -17,3 +17,5 @@ pytz
 xlrd
 scipy
 seaborn
+tzlocal
+autopep8
