@@ -1,7 +1,25 @@
 import json
 import logging
-import asyncio
-from typing import List, Dict, Any, Tuple, Optional, Callable
+import os
+import base64
+import hashlib
+import re
+import threading
+import datetime
+import time
+import traceback
+import sys
+from typing import List, Dict, Any, Tuple, Optional
+import discord
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Add the project root to sys.path to ensure imports work consistently
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 
 def get_tools_for_model() -> List[Dict[str, Any]]:
     """
@@ -11,6 +29,28 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
         List of tool objects
     """
     return [
+        {
+            "type": "function",
+            "function": {
+                "name": "analyze_data_file",
+                "description": "Analyze a data file (CSV or Excel) and generate visualizations. Use this tool when a user uploads a data file and wants insights or visualizations. The visualizations will be automatically displayed in Discord. When describing the results, refer to visualizations by their chart_id and explain what they show. Always inform the user they can see the visualizations directly in the Discord chat.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the data file to analyze"
+                        },
+                        "analysis_type": {
+                            "type": "string",
+                            "description": "Type of analysis to perform (e.g., 'summary', 'correlation', 'distribution')",
+                            "enum": ["summary", "correlation", "distribution", "comprehensive"]
+                        }
+                    },
+                    "required": ["file_path"]
+                }
+            }
+        },
         {
             "type": "function",
             "function": {
@@ -55,42 +95,6 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "code_interpreter",
-                "description": "Run code in Python with support for data visualization libraries. Use this to execute code, perform calculations, create charts, and analyze data files. Supports key data science and visualization libraries.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The code to execute. For data visualization, you can use pandas, matplotlib, seaborn, numpy, plotly, bokeh, altair, and other common data science libraries. When generating charts, remember to save the output as bytes using BytesIO."
-                        },
-                        "language": {
-                            "type": "string",
-                            "description": "The programming language (default: python)",
-                            "default": "python",
-                            "enum": ["python", "c++"]
-                        },
-                        "input": {
-                            "type": "string",
-                            "description": "Optional input data for the code"
-                        },
-                        "include_visualization": {
-                            "type": "boolean",
-                            "description": "Set to true if the code generates a chart or visualization that should be displayed to the user and stored in history.",
-                            "default": False
-                        },
-                        "file_path": {
-                            "type": "string",
-                            "description": "Optional path to a data file to be processed by the code. Used when analyzing uploaded data files."
-                        }
-                    },
-                    "required": ["code"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "generate_image",
                 "description": "Generate images based on text prompts. Use this when the user asks for an image to be created.",
                 "parameters": {
@@ -109,6 +113,43 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                         }
                     },
                     "required": ["prompt"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "code_interpreter",
+                "description": "Execute Python code to solve problems, perform calculations, or create data visualizations. Use this for data analysis, generating charts, and processing data. When analyzing data, ALWAYS include code for visualizations (using matplotlib, seaborn, or plotly) if the user requests charts or graphs. When visualizations are created, tell the user they can view the charts directly in Discord, and reference visualizations by their chart_id in your descriptions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "The Python code to execute. For data analysis, include necessary imports (pandas, matplotlib, etc.) and visualization code."
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Programming language (only Python supported)",
+                            "enum": ["python", "py"]
+                        },
+                        "input": {
+                            "type": "string",
+                            "description": "Optional input data for the code"
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "Optional path to a data file to analyze (supports CSV and Excel files)"
+                        },
+                        "analysis_request": {
+                            "type": "string",
+                            "description": "Natural language description of the analysis to perform. If this includes visualization requests, the generated code must include plotting code using matplotlib, seaborn, or plotly."
+                        },
+                        "include_visualization": {
+                            "type": "boolean",
+                            "description": "Whether to include visualizations using matplotlib/seaborn"
+                        }
+                    }
                 }
             }
         },
@@ -245,7 +286,11 @@ def trim_content_to_token_limit(content: str, max_tokens: int = 8096) -> str:
             text = text[text.find('\n', 1000):]
         return text
         
-    return '\n'.join(lines)
+    return '\n.join(lines)'
+
+async def prepare_file_from_path(file_path: str) -> discord.File:
+    """Convert a file path to a Discord File object."""
+    return discord.File(file_path)
 
 def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -266,7 +311,7 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     if not has_system_message:
         prepared_messages.append({
             "role": "system",
-            "content": "You are a helpful AI assistant that can answer questions, provide information, and assist with various tasks."
+            "content": "You are a helpful AI assistant that can answer questions, provide information, and assist with various tasks. When handling data analysis, always describe the visualizations in detail and refer to them by their chart_id. For any data file uploaded by the user, use the analyze_data_file tool or code_interpreter tool to generate analysis and visualizations. When visualizations are created, they will be automatically displayed in the Discord chat. Always mention that the user can see the visualizations directly in Discord."
         })
     
     for msg in messages:
@@ -277,22 +322,130 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
         # Create a copy of the message to avoid modifying the original
         processed_msg = dict(msg)
         
-        # Handle image URLs with timestamps in content
+        # Handle image URLs and file paths in content
         if isinstance(processed_msg.get('content'), list):
-            # Filter out images that have a timestamp (they're already handled specially)
             new_content = []
             for item in processed_msg['content']:
-                if item.get('type') == 'image_url' and 'timestamp' in item:
-                    # Remove timestamp from API calls
-                    new_item = dict(item)
-                    if 'timestamp' in new_item:
-                        del new_item['timestamp']
+                if item.get('type') == 'image_url':
+                    # Remove timestamp and ensure we're using the actual file path
+                    new_item = {
+                        'type': 'image_url',
+                        'image_url': item.get('image_url', '')
+                    }
                     new_content.append(new_item)
                 else:
                     new_content.append(item)
-            
             processed_msg['content'] = new_content
         
         prepared_messages.append(processed_msg)
         
     return prepared_messages
+
+def generate_data_analysis_code(analysis_request: str, file_path: str) -> str:
+    """
+    Generate Python code for data analysis based on user request
+    """
+    # Set up imports
+    code = """import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+"""
+
+    # Basic data loading
+    file_extension = os.path.splitext(file_path)[1].lower()
+    if file_extension == '.xlsx':
+        code += f"\n# Read the Excel file\ndf = pd.read_excel('{file_path}')\n"
+    else:
+        code += f"\n# Read the CSV file\ndf = pd.read_csv('{file_path}')\n"
+
+    # Basic data exploration
+    code += """
+# Display basic information
+print("Dataset Info:")
+print(f"Shape: {df.shape[0]} rows, {df.shape[1]} columns")
+print("\\nColumns:", df.columns.tolist())
+print("\\nData Types:")
+print(df.dtypes)
+print("\\nMissing Values:")
+print(df.isnull().sum())
+"""
+
+    # Generate specific analysis code based on request
+    if 'correlation' in analysis_request.lower():
+        code += """
+# Generate correlation matrix
+plt.figure(figsize=(12, 8))
+numeric_cols = df.select_dtypes(include=['number']).columns
+sns.heatmap(df[numeric_cols].corr(), annot=True, cmap='coolwarm')
+plt.title('Correlation Matrix')
+plt.tight_layout()
+"""
+
+    if any(word in analysis_request.lower() for word in ['distribution', 'histogram']):
+        code += """
+# Plot distributions for numeric columns
+numeric_cols = df.select_dtypes(include=['number']).columns
+for col in numeric_cols[:3]:  # Limit to first 3 columns
+    plt.figure(figsize=(10, 6))
+    sns.histplot(data=df, x=col, kde=True)
+    plt.title(f'Distribution of {col}')
+    plt.tight_layout()
+"""
+
+    if 'scatter' in analysis_request.lower():
+        code += """
+# Generate scatter plots for numeric columns
+numeric_cols = df.select_dtypes(include(['number']).columns
+if len(numeric_cols) >= 2:
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(data=df, x=numeric_cols[0], y=numeric_cols[1])
+    plt.title(f'Scatter Plot: {numeric_cols[0]} vs {numeric_cols[1]}')
+    plt.tight_layout()
+"""
+
+    if 'box' in analysis_request.lower() or 'boxplot' in analysis_request.lower():
+        code += """
+# Generate box plots for numeric columns
+numeric_cols = df.select_dtypes(include(['number']).columns
+plt.figure(figsize=(12, 6))
+df[numeric_cols].boxplot()
+plt.xticks(rotation=45)
+plt.title('Box Plots of Numeric Variables')
+plt.tight_layout()
+"""
+
+    return code
+
+async def analyze_with_ai(
+    messages: List[Dict[str, Any]], 
+    model: str = "gpt-3.5-turbo",
+    temperature: float = 0.7,
+    file_path: Optional[str] = None,
+    analysis_request: Optional[str] = None
+) -> Dict[str, Any]:
+    response = {"success": True}
+    
+    try:
+        # Process messages for API
+        prepared_messages = prepare_messages_for_api(messages)
+        
+        if file_path and analysis_request:
+            # Generate data analysis code
+            analysis_code = generate_data_analysis_code(analysis_request, file_path)
+            response["generated_code"] = analysis_code
+            
+            # Add analysis context to messages
+            prepared_messages.append({
+                "role": "system",
+                "content": f"The user has provided a data file for analysis. Generated code:\n{analysis_code}"
+            })
+        
+        # Add your existing OpenAI API call logic here
+        # ... existing API call code ...
+        
+    except Exception as e:
+        logging.error(f"Error in analyze_with_ai: {str(e)}")
+        response["success"] = False
+        response["error"] = str(e)
+        
+    return response

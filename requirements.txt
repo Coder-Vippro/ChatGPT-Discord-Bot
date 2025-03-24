@@ -9,13 +9,7 @@ requests
 aiohttp
 runware
 python-dotenv
-webdriver-manager
 matplotlib
 pandas
 openpyxl
-pytz
-xlrd
-scipy
 seaborn
-tzlocal
-autopep8

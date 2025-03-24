@@ -139,19 +139,23 @@ async def process_pdf_batch(model: str, client, user_prompt: str, batch_content:
             # Create message without history but with appropriate prompt handling
             trimmed_content = trim_content_to_token_limit(batch_content, 7000)  # Leave room for prompt
             
+            # Ensure the user's prompt is prominently included
+            # Format the user prompt to be clearly visible at the beginning of the analysis
+            formatted_user_prompt = f"USER QUESTION: {user_prompt}"
+            
             messages = []
             if model in ["o1-mini", "o1-preview"]:
                 # These models don't support system prompts
                 messages = [
-                    {"role": "user", "content": f"Instructions: {PDF_ANALYSIS_PROMPT}\n\n{user_prompt}\n\nAnalyze the following content:\n{trimmed_content}"}
+                    {"role": "user", "content": f"Instructions: {PDF_ANALYSIS_PROMPT}\n\n{formatted_user_prompt}\n\nAnalyze the following content with specific focus on addressing the user's question:\n{trimmed_content}"}
                 ]
             else:
                 messages = [
                     {"role": "system", "content": PDF_ANALYSIS_PROMPT},
-                    {"role": "user", "content": f"{user_prompt}\n\nAnalyze the following content:\n{trimmed_content}"}
+                    {"role": "user", "content": f"{formatted_user_prompt}\n\nAnalyze the following content with specific focus on addressing the user's question:\n{trimmed_content}"}
                 ]
             
-            # Add await here - this was the issue causing the error
+            # Add await here
             response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -159,7 +163,9 @@ async def process_pdf_batch(model: str, client, user_prompt: str, batch_content:
             )
             
             reply = response.choices[0].message.content
-            batch_response = f"Batch {current_batch}/{total_batches} (Pages in batch: {batch_size}):\n{reply}"
+            
+            # Add a reminder of the user's question to the response
+            batch_response = f"Batch {current_batch}/{total_batches} (Pages in batch: {batch_size}):\n\nUser question: {user_prompt}\n\n{reply}"
             await send_response(channel, batch_response)
             return True
             

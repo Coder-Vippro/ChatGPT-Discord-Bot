@@ -16,7 +16,7 @@ import traceback
 from datetime import datetime, timedelta
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
-from src.utils.code_utils import extract_code_blocks, execute_code
+from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
 
 # Global task and rate limiting tracking
@@ -99,6 +99,9 @@ class MessageHandler:
         
         # Start chart cleanup task
         self.chart_cleanup_task = asyncio.create_task(self._run_chart_cleanup())
+        
+        # Start data file cleanup task
+        self.file_cleanup_task = asyncio.create_task(self._run_file_cleanup())
 
         # Install required packages if not available
         if not PANDAS_AVAILABLE:
@@ -148,198 +151,84 @@ class MessageHandler:
         return json.dumps({"error": "This function has been deprecated. Please use code_interpreter instead."})
     
     async def _code_interpreter(self, args: Dict[str, Any]):
-        """
-        Execute code interpreter tool function with enhanced data visualization capabilities.
-        
-        Args:
-            args: Arguments containing code, language, input, and visualization flags
-        
-        Returns:
-            str: Code execution result along with the original code
-        """
-        code = args.get("code", "")
-        language = args.get("language", "python")
-        input_data = args.get("input", "")
-        include_visualization = args.get("include_visualization", False)
-        file_path = args.get("file_path", "")
-        
-        if not code:
-            return "Error: No code provided"
-        
-        # Find user_id from current task to track chart generation
-        current_task = asyncio.current_task()
-        user_id = None
-        
-        for uid, tasks in user_tasks.items():
-            if current_task in tasks:
-                user_id = uid
-                break
-        
-        # Get the data files directory from code_utils
-        from src.utils.code_utils import DATA_FILES_DIR
-        
-        # Handle data file if specified in the code_interpreter call
-        if file_path:
-            file_bytes = None
-            if user_id in user_data_files:
-                file_bytes = user_data_files[user_id].get("bytes")
-                
-            if not file_bytes:
-                return json.dumps({"error": "No data file found. Please upload a CSV or Excel file first."})
+        """Handle code interpreter functionality"""
+        try:
+            # Import and call code interpreter
+            from src.utils.code_interpreter import execute_code
+            execute_result = await execute_code(args)
             
-            # Create a persistent temporary file for the code to use
-            filename = user_data_files[user_id].get("filename", "data.csv")
-            file_extension = os.path.splitext(filename)[1]
-            temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
-            
-            # Save the file with better error handling
-            try:
-                with open(temp_file_path, "wb") as f:
-                    f.write(file_bytes)
-                logging.info(f"Saved data file for analysis at {temp_file_path}")
-                
-                # Also log the absolute path for debugging
-                logging.info(f"Absolute data file path: {os.path.abspath(temp_file_path)}")
-                
-                # Log file size and existence
-                file_size = os.path.getsize(temp_file_path)
-                logging.info(f"Data file size: {file_size} bytes, exists: {os.path.exists(temp_file_path)}")
-                
-                # Include path to data file in input_data
-                if input_data:
-                    input_data += f"\nDATA_FILE_PATH={temp_file_path}"
-                else:
-                    input_data = f"DATA_FILE_PATH={temp_file_path}"
-                
-                # Also log the first few bytes of the file for debugging
-                if file_size > 0:
-                    with open(temp_file_path, "rb") as f:
-                        first_bytes = f.read(min(100, file_size))
-                        logging.info(f"First bytes of data file: {first_bytes}")
-            except Exception as e:
-                logging.error(f"Error saving data file: {str(e)}")
-                return json.dumps({"error": f"Failed to save data file: {str(e)}"})
-        
-        # Check if visualization code is included
-        has_visualization = False
-        if language.lower() == "python":
-            has_visualization = include_visualization or any(x in code for x in [
-                "matplotlib", "plt.figure", "plt.plot", "sns.plot", 
-                "plt.savefig", "plt.show", "BytesIO", 
-                "plotly", "bokeh", "altair"
-            ])
-            
-            # Add explicit file access code if a data file is present
-            if file_path and "DATA_FILE_PATH" in input_data and "pandas" in code:
-                # Add check to see if the data file was read correctly
-                file_check_code = """
-# Check and log data file accessibility
-try:
-    data_file_path = globals().get('DATA_FILE_PATH', None)
-    if data_file_path:
-        print(f"Attempting to access data file at: {data_file_path}")
-        # Check if file exists
-        import os
-        if os.path.exists(data_file_path):
-            print(f"Data file exists, size: {os.path.getsize(data_file_path)} bytes")
-            # Try to read a few bytes
-            with open(data_file_path, 'rb') as f:
-                first_bytes = f.read(100)
-                print(f"First bytes: {first_bytes}")
-        else:
-            print(f"ERROR: Data file not found at {data_file_path}")
-    else:
-        print("ERROR: No data file path provided")
-except Exception as e:
-    print(f"Error checking data file: {str(e)}")
-"""
-                # Prepend the check to the user's code
-                code = file_check_code + "\n" + code
-            
-            # If we have visualization, make sure code produces image bytes
-            if has_visualization and "BytesIO" not in code:
-                # Modify the code to capture plot output in bytes
-                visualization_wrapper = """
-import io
-from datetime import datetime
+            # If there are visualizations, handle them
+            if execute_result and execute_result.get("visualizations"):
+                for i, viz_path in enumerate(execute_result["visualizations"]):
+                    try:
+                        with open(viz_path, 'rb') as f:
+                            img_data = f.read()
+                            
+                        # Get the current message context from user_tasks
+                        current_task = asyncio.current_task()
+                        discord_message = None
+                        for uid, tasks in user_tasks.items():
+                            if current_task in tasks:
+                                for task_info in tasks[current_task]:
+                                    if 'message' in task_info:
+                                        discord_message = task_info['message']
+                                        break
+                                break
+                                
+                        if discord_message:
+                            # Upload chart to Discord and get URL
+                            chart_url = await self._upload_and_get_chart_url(
+                                img_data, 
+                                f"chart_{i+1}.png",
+                                discord_message.channel
+                            )
+                            
+                            if chart_url:
+                                # Store the URL in history
+                                execute_result.setdefault("chart_urls", []).append(chart_url)
+                                
+                                # Send the chart with description
+                                await discord_message.channel.send(
+                                    "📊 Generated visualization:",
+                                    file=discord.File(io.BytesIO(img_data), filename=f"chart_{i+1}.png")
+                                )
+                            
+                    except Exception as e:
+                        logging.error(f"Error handling visualization: {str(e)}")
+                        traceback.print_exc()
 
-# Create BytesIO object to store the image
-buffer = io.BytesIO()
+            # Update history with chart URLs if available
+            if execute_result and execute_result.get("chart_urls"):
+                content = []
+                if execute_result.get("output"):
+                    content.append({
+                        "type": "text",
+                        "text": execute_result["output"]
+                    })
+                
+                # Add each chart URL to content
+                for chart_url in execute_result["chart_urls"]:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": chart_url},
+                        "timestamp": datetime.now().isoformat()
+                    })
+                
+                return {
+                    "role": "assistant",
+                    "content": content
+                }
+            else:
+                return {
+                    "role": "assistant", 
+                    "content": execute_result.get("output", "No output generated") if execute_result else "No output generated"
+                }
 
-# Execute the original code
-{0}
-
-# If using matplotlib, save the current figure to the buffer
-try:
-    import matplotlib.pyplot as plt
-    if plt.get_fignums():  # Check if any figures exist
-        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-        plt.close('all')
-        buffer.seek(0)
-        print("\\n[CHART_DATA_START]")
-        import base64
-        print(base64.b64encode(buffer.getvalue()).decode('utf-8'))
-        print("[CHART_DATA_END]")
-except Exception as e:
-    print(f"Error saving visualization: {{e}}")
-"""
-                # Indent the original code to fit into our template
-                indented_code = "\n".join("    " + line for line in code.split("\n"))
-                code = visualization_wrapper.format(indented_code)
-        
-        # Log the code and inputs before execution for debugging
-        logging.debug(f"Executing code with input_data: {input_data[:100]}...")
-        
-        # Execute the code
-        result = await execute_code(code, language, input_data=input_data)
-        
-        # Log the execution result for debugging
-        if result:
-            logging.debug(f"Code execution result: {result[:500]}...")
-        
-        # We no longer delete the file immediately to allow for longer access
-        # Data files will be cleaned up after 23 hours by the chart cleanup task
-        
-        # Check for chart data in output
-        chart_image = None
-        if has_visualization and "[CHART_DATA_START]" in result and "[CHART_DATA_END]" in result:
-            try:
-                # Extract base64 encoded image data
-                start_marker = "[CHART_DATA_START]"
-                end_marker = "[CHART_DATA_END]"
-                start_idx = result.find(start_marker) + len(start_marker)
-                end_idx = result.find(end_marker)
-                if start_idx > 0 and end_idx > start_idx:
-                    base64_data = result[start_idx:end_idx].strip()
-                    chart_image = base64.b64decode(base64_data)
-                    
-                    # Store chart in user history if we have a user_id
-                    if user_id:
-                        chart_id = f"{user_id}_{int(time.time())}"
-                        user_charts[chart_id] = {
-                            "image": chart_image,
-                            "timestamp": datetime.now(),
-                            "user_id": user_id
-                        }
-                        
-                        # Remove chart data from result to avoid showing base64 code
-                        result = result[:result.find(start_marker)] + "\n[Chart generated successfully]" + result[result.find(end_marker) + len(end_marker):]
-            except Exception as e:
-                logging.error(f"Error processing chart data: {str(e)}")
-        
-        # Format the response
-        formatted_response = {
-            "code": args.get("code", ""),  # Original code, not our modified version
-            "language": language,
-            "result": result,
-            "input_data": input_data if input_data else "None",
-            "has_chart": chart_image is not None
-        }
-        
-        if chart_image is not None:
-            formatted_response["chart_id"] = chart_id if 'chart_id' in locals() else None
-        
-        return json.dumps(formatted_response)
+        except Exception as e:
+            error_msg = f"Error in code interpreter: {str(e)}"
+            logging.error(error_msg)
+            traceback.print_exc()
+            return {"role": "assistant", "content": error_msg}
     
     def _should_respond_to_message(self, message: discord.Message) -> bool:
         """
@@ -437,111 +326,155 @@ except Exception as e:
     
     async def _handle_data_file(self, attachment, message, user_id, history, model, start_time):
         """
-        Handle data file analysis for CSV and Excel files
+        Handle a data file attachment with analysis capabilities
         
         Args:
-            attachment: The file attachment
+            attachment: The Discord file attachment
             message: The Discord message
-            user_id: The user ID
-            history: Message history
-            model: AI model to use
-            start_time: Time when processing started
+            user_id: User ID for tracking
+            history: Conversation history
+            model: OpenAI model to use
+            start_time: Timestamp when processing started
+            
+        Returns:
+            Dict with analysis results
         """
         try:
-            # Read data file
+            # Get file contents and determine file type
+            file_extension = os.path.splitext(attachment.filename)[1].lower()
             file_bytes = await attachment.read()
-            query = message.content if message.content else "Analyze this data file and provide a summary."
             
-            # Save temporary file information
+            # Store the data file in user_data_files for future reference
             user_data_files[user_id] = {
-                "filename": attachment.filename,
                 "bytes": file_bytes,
-                "timestamp": datetime.now().timestamp()
+                "filename": attachment.filename,
+                "timestamp": datetime.now()
             }
             
-            # Try to import required packages
-            try:
-                import pandas as pd
-                import io
-                import matplotlib
-                matplotlib.use('Agg')  # Use non-interactive backend
-                import matplotlib.pyplot as plt
-                import seaborn as sns
-                
-                # Read the data file
-                file_obj = io.BytesIO(file_bytes)
-                try:
-                    if attachment.filename.lower().endswith('.csv'):
-                        df = pd.read_csv(file_obj)
-                    elif attachment.filename.lower().endswith(('.xlsx', '.xls')):
-                        df = pd.read_excel(file_obj)
-                    
-                    # Basic data summary
-                    rows, cols = df.shape
-                    summary = []
-                    summary.append(f"Data File: {attachment.filename}")
-                    summary.append(f"Rows: {rows}")
-                    summary.append(f"Columns: {cols}")
-                    summary.append(f"Column names: {', '.join(df.columns.tolist())}")
-
-                    # Basic statistics for numeric columns
-                    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-                    categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
-                    
-                    summary.append(f"\nNumeric columns: {len(numeric_cols)}")
-                    summary.append(f"Categorical columns: {len(categorical_cols)}")
-                    
-                    if numeric_cols:
-                        summary.append("\nSample statistics:")
-                        desc = df[numeric_cols].describe().round(2)
-                        summary.append(desc.to_string())
-                    
-                    data_summary = '\n'.join(summary)
-                    
-                    # Send data summary
-                    await message.channel.send(f"📊 Data File Analysis:\n```\n{data_summary[:1900]}```")
-                except Exception as analysis_error:
-                    error_msg = f"Error analyzing data file: {str(analysis_error)}"
-                    logging.error(error_msg)
-                    await message.channel.send(f"📊 Data File Analysis:\nError: {error_msg}")
-                    
-            except ImportError as import_error:
-                # If pandas import fails at this stage, reinstall packages
-                logging.error(f"Import error handling data file: {str(import_error)}")
-                await message.channel.send(f"📊 Data File Analysis:\nError: Required libraries not available. Installing required packages...")
-                
-                # Install required packages
-                try:
-                    for pkg in ["pandas", "numpy", "matplotlib", "seaborn", "openpyxl"]:
-                        result = subprocess.run(
-                            [sys.executable, "-m", "pip", "install", pkg],
-                            capture_output=True,
-                            text=True,
-                            check=False
-                        )
-                        if result.returncode != 0:
-                            logging.warning(f"Failed to install {pkg}: {result.stderr}")
-                        else:
-                            logging.info(f"Successfully installed {pkg}")
-                    
-                    await message.channel.send(f"📊 Data File Analysis:\nPackages installed. Please try again.")
-                    return
-                except Exception as e:
-                    logging.error(f"Error installing data analysis packages: {str(e)}")
-                    await message.channel.send(f"📊 Data File Analysis:\nError: Failed to install required packages. {str(e)}")
-                    return
+            # Extract query from message if any
+            content = message.content.strip()
+            query = content if content else "Analyze this data file and create relevant visualizations"
             
-            # Now use the AI to generate a response with chart creation hint
-            ai_prompt = f"I've uploaded a data file {attachment.filename}. {query}\n\nAnalyze this data and create a visualization that best represents the key insights."
+            # Determine analysis type based on query
+            analysis_type = "comprehensive"  # Default
+            if any(word in query.lower() for word in ['correlation', 'correlate', 'relationship']):
+                analysis_type = "correlation"
+            elif any(word in query.lower() for word in ['distribution', 'histogram', 'spread']):
+                analysis_type = "distribution"
+            elif any(word in query.lower() for word in ['bar', 'count', 'frequency']):
+                analysis_type = "bar"
+            elif any(word in query.lower() for word in ['scatter', 'relation']):
+                analysis_type = "scatter"
+            elif any(word in query.lower() for word in ['box', 'boxplot']):
+                analysis_type = "box"
             
-            # Call API for analysis
-            await self._process_text_message(message, user_id, ai_prompt, model, history, start_time)
+            # Save file to local storage
+            from src.utils.code_utils import DATA_FILES_DIR
+            temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
+            
+            # Save file
+            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+            with open(temp_file_path, "wb") as f:
+                f.write(file_bytes)
+                
+            logging.info(f"Saved data file for analysis at: {temp_file_path}")
+            
+            # First send a message to show we're working
+            await message.channel.send("📊 Analyzing data file and generating visualizations...")
+            
+            # Import analyze_data function from code_utils
+            from src.utils.code_utils import analyze_data
+            
+            # Run analysis with the specific analysis type
+            result = analyze_data(file_path=temp_file_path, user_id=user_id, analysis_type=analysis_type)
+            
+            # Handle error if any
+            if "error" in result:
+                await message.channel.send(f"❌ Error analyzing data: {result['error']}")
+                return result
+            
+            # Send summary text
+            summary = result.get("summary", {})
+            summary_text = f"📋 **Data Analysis Summary**\n"
+            summary_text += f"• Rows: {summary.get('rows', 'N/A')}\n"
+            summary_text += f"• Columns: {summary.get('columns', 'N/A')}\n"
+            summary_text += f"• Column names: {', '.join(summary.get('column_names', [])[:5])}{'...' if len(summary.get('column_names', [])) > 5 else ''}\n"
+            
+            # Add missing values info if available
+            if "missing_values" in summary:
+                missing_values = summary["missing_values"]
+                missing_vals_text = "\n• Missing values: "
+                missing_cols = [f"{col}({count})" for col, count in missing_values.items() if count > 0]
+                summary_text += missing_vals_text + (", ".join(missing_cols[:3]) if missing_cols else "None") + "\n"
+            
+            await message.channel.send(summary_text)
+            
+            # Send each visualization as a separate file
+            if "plots" in result and result["plots"]:
+                for i, plot_path in enumerate(result["plots"]):
+                    if os.path.exists(plot_path):
+                        try:
+                            # Read the image file
+                            with open(plot_path, "rb") as f:
+                                img_bytes = f.read()
+                                
+                            # Send the image directly to Discord
+                            plot_filename = os.path.basename(plot_path)
+                            sent_message = await message.channel.send(
+                                f"📊 Visualization {i+1}:", 
+                                file=discord.File(io.BytesIO(img_bytes), filename=plot_filename)
+                            )
+                            
+                            # Store in user_charts for potential later reference
+                            chart_id = f"{user_id}_{int(time.time())}_{i}"
+                            user_charts[chart_id] = {
+                                "image": img_bytes,
+                                "timestamp": datetime.now(),
+                                "user_id": user_id
+                            }
+                            
+                            # Add image to conversation history - with fix for DMChannel
+                            if len(history) > 0 and history[-1]["role"] == "assistant":
+                                # Get the uploaded image URL safely - works in both guild channels and DMs
+                                if sent_message.attachments and len(sent_message.attachments) > 0:
+                                    plot_url = sent_message.attachments[0].url
+                                    
+                                    # If content is already a list, append to it
+                                    if isinstance(history[-1]["content"], list):
+                                        history[-1]["content"].append({
+                                            "type": "image_url",
+                                            "image_url": {"url": plot_url},
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                    else:
+                                        # Convert text content to list with text and image
+                                        text_content = history[-1]["content"]
+                                        history[-1]["content"] = [
+                                            {"type": "text", "text": text_content},
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {"url": plot_url},
+                                                "timestamp": datetime.now().isoformat()
+                                            }
+                                        ]
+                                    
+                                    # Save updated history
+                                    await self.db.save_history(user_id, history)
+                            
+                        except Exception as e:
+                            logging.error(f"Error sending visualization {i}: {str(e)}")
+                            await message.channel.send(f"❌ Error displaying visualization {i+1}: {str(e)}")
+            else:
+                await message.channel.send("No visualizations were generated. Try a different data file or request.")
+                
+            return result
             
         except Exception as e:
-            error_msg = f"Error processing data file: {str(e)}"
+            error_msg = f"Error handling data file: {str(e)}"
             logging.error(error_msg)
-            await message.channel.send(error_msg)
-            return
+            traceback.print_exc()
+            await message.channel.send(f"❌ {error_msg}")
+            return {"error": error_msg}
 
     async def _process_user_message(self, message: discord.Message):
         """
@@ -704,7 +637,7 @@ except Exception as e:
                 
                 # Extract system message content
                 for msg in history:
-                    if msg.get('role') == 'system':
+                    if (msg.get('role') == 'system'):
                         system_content = msg.get('content', '')
                     else:
                         history_without_system.append(msg)
@@ -866,23 +799,23 @@ except Exception as e:
                     chart_data = user_charts[chart_id]["image"]
                     chart_filename = f"chart_{chart_id}.png"
                     
-                    # Send the chart
-                    await message.channel.send(
+                    # Send the chart to Discord and get the URL
+                    chart_message = await message.channel.send(
                         "📊 Chart generated:",
                         file=discord.File(io.BytesIO(chart_data), filename=chart_filename)
                     )
                     
-                    # Add the chart to message history with timestamp
-                    chart_url = await self._upload_and_get_chart_url(chart_data, chart_filename, message.channel)
-                    if chart_url:
-                        # Add image to history with timestamp
+                    # Get the chart URL from Discord attachment
+                    if chart_message.attachments and len(chart_message.attachments) > 0:
+                        chart_url = chart_message.attachments[0].url
+                        # Add image URL to history with timestamp
                         if history[-1]["role"] == "assistant":
                             # If the last message was from the assistant, append the image to it
                             if isinstance(history[-1]["content"], list):
                                 history[-1]["content"].append({
                                     "type": "image_url",
                                     "image_url": {"url": chart_url},
-                                    "timestamp": datetime.now().isoformat()  # Add timestamp for expiration tracking
+                                    "timestamp": datetime.now().isoformat()
                                 })
                             else:
                                 # Convert string content to list with text and image
@@ -896,7 +829,7 @@ except Exception as e:
                                     }
                                 ]
                         
-                        # Save updated history
+                        # Save updated history immediately after getting the URL
                         await self.db.save_history(user_id, history)
                         
                 except Exception as e:
@@ -915,30 +848,23 @@ except Exception as e:
             logging.error(f"Error in message processing: {error_message}")
             await message.channel.send(error_message)
     
-    async def _upload_and_get_chart_url(self, chart_data, filename, channel):
+    async def _upload_and_get_chart_url(self, image_data, filename, channel):
         """
-        Upload a chart image to Discord and get its URL for history.
+        Upload an image to Discord and get its URL for later reference
         
         Args:
-            chart_data: The binary chart data
-            filename: The filename to use
-            channel: Discord channel to send to
+            image_data: Binary image data
+            filename: Filename for the image
+            channel: Discord channel to upload to
             
         Returns:
-            str: URL of the uploaded image or None if failed
+            str: URL of the uploaded image or None on failure
         """
         try:
-            message = await channel.send(
-                "Saving chart to history...",
-                file=discord.File(io.BytesIO(chart_data), filename=filename)
-            )
-            
-            # Get the attachment URL from the message
+            file = discord.File(io.BytesIO(image_data), filename=filename)
+            message = await channel.send(file=file)
             if message.attachments and len(message.attachments) > 0:
-                # Delete the message since we only needed it to get the URL
-                await message.delete()
                 return message.attachments[0].url
-                
             return None
         except Exception as e:
             logging.error(f"Error uploading chart: {str(e)}")
@@ -1053,7 +979,7 @@ except Exception as e:
         """Download an image from a URL with error handling"""
         try:
             async with session.get(url) as resp:
-                if resp.status == 200:
+                if (resp.status == 200):
                     return await resp.read()
                 else:
                     logging.warning(f"Failed to download image, status: {resp.status}")
@@ -1169,6 +1095,161 @@ except Exception as e:
         except Exception as e:
             return json.dumps({"error": str(e), "prompt": prompt})
     
+    async def _analyze_data_file(self, args: Dict[str, Any]) -> str:
+        """
+        Analyze a data file directly using the AI and data analysis tools.
+        
+        Args:
+            args: Dictionary containing file_path and optional parameters
+            
+        Returns:
+            JSON string with analysis results
+        """
+        file_path = args.get("file_path", "")
+        user_id = args.get("user_id", "default")
+        
+        if not file_path:
+            return json.dumps({"error": "No file path provided"})
+            
+        # Find real user_id from current task if not provided
+        if user_id == "default":
+            current_task = asyncio.current_task()
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    break
+        
+        try:
+            # Try to find file in user data files if it's not a direct path
+            if not os.path.exists(file_path) and user_id in user_data_files:
+                # Create temporary file from bytes in memory
+                from src.utils.code_utils import DATA_FILES_DIR
+                file_bytes = user_data_files[user_id].get("bytes")
+                filename = user_data_files[user_id].get("filename", "data.csv")
+                file_extension = os.path.splitext(filename)[1]
+                
+                temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
+                
+                with open(temp_file_path, "wb") as f:
+                    f.write(file_bytes)
+                
+                file_path = temp_file_path
+                logging.info(f"Created temporary file for analysis: {file_path}")
+                
+            # Import analyze_data function from code_utils
+            from src.utils.code_utils import analyze_data
+            
+            # Run analysis
+            result = analyze_data(file_path, user_id)
+            
+            # Handle error if any
+            if "error" in result:
+                return json.dumps({"error": result["error"]})
+                
+            # Format plots for response
+            plots_data = []
+            if "plots" in result:
+                for plot_path in result["plots"]:
+                    if os.path.exists(plot_path):
+                        try:
+                            # Read the image file and encode
+                            with open(plot_path, "rb") as f:
+                                img_bytes = f.read()
+                                # Store chart in user charts
+                                chart_id = f"{user_id}_{int(time.time())}_{plots_data.__len__()}"
+                                user_charts[chart_id] = {
+                                    "image": img_bytes,
+                                    "timestamp": datetime.now(),
+                                    "user_id": user_id
+                                }
+                                
+                                plots_data.append({
+                                    "chart_id": chart_id,
+                                    "path": plot_path
+                                })
+                        except Exception as e:
+                            logging.error(f"Error processing visualization: {str(e)}")
+                            
+            # Format response
+            response = {
+                "success": True,
+                "file_path": file_path,
+                "summary": result.get("summary", {}),
+                "visualizations": plots_data,
+                "visualization_count": len(plots_data)
+            }
+            
+            return json.dumps(response)
+            
+        except Exception as e:
+            logging.error(f"Error in analyze_data_file: {str(e)}")
+            return json.dumps({"error": f"Failed to analyze data file: {str(e)}"})
+            
+    async def _generate_data_analysis_code(self, args: Dict[str, Any]) -> str:
+        """
+        Generate Python code for analyzing data based on natural language request.
+        
+        Args:
+            args: Dictionary containing file_path and analysis_request
+            
+        Returns:
+            JSON string with generated code
+        """
+        file_path = args.get("file_path", "")
+        analysis_request = args.get("analysis_request", "")
+        
+        if not file_path:
+            return json.dumps({"error": "No file path provided"})
+            
+        if not analysis_request:
+            return json.dumps({"error": "No analysis request provided"})
+            
+        # Find user_id from current task
+        current_task = asyncio.current_task()
+        user_id = None
+        for uid, tasks in user_tasks.items():
+            if current_task in tasks:
+                user_id = uid
+                break
+                
+        try:
+            # Try to find file in user data files if it's not a direct path
+            if not os.path.exists(file_path) and user_id in user_data_files:
+                # Create temporary file from bytes in memory
+                from src.utils.code_utils import DATA_FILES_DIR
+                file_bytes = user_data_files[user_id].get("bytes")
+                filename = user_data_files[user_id].get("filename", "data.csv")
+                file_extension = os.path.splitext(filename)[1]
+                
+                temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
+                
+                with open(temp_file_path, "wb") as f:
+                    f.write(file_bytes)
+                
+                file_path = temp_file_path
+                logging.info(f"Created temporary file for code generation: {file_path}")
+            
+            # Import code generation function
+            from src.utils.code_utils import generate_analysis_code
+            
+            # Generate code based on user request
+            code = generate_analysis_code(file_path, analysis_request)
+            
+            # Format response
+            response = {
+                "success": True,
+                "file_path": file_path,
+                "analysis_request": analysis_request,
+                "generated_code": code,
+                "message": "You can run this code using the code_interpreter tool."
+            }
+            
+            return json.dumps(response)
+            
+        except Exception as e:
+            logging.error(f"Error in generate_data_analysis_code: {str(e)}")
+            return json.dumps({"error": f"Failed to generate analysis code: {str(e)}"})
+    
     @staticmethod
     async def stop_user_tasks(user_id: int):
         """
@@ -1177,10 +1258,72 @@ except Exception as e:
         Args:
             user_id: The Discord user ID
         """
+        logging.info(f"MessageHandler: Stopping all tasks for user {user_id}")
+        
+        # Cancel all tasks for the user
         if user_id in user_tasks:
-            for task in user_tasks[user_id]:
-                task.cancel()
+            # Make a copy since we'll modify the list while iterating
+            tasks_to_cancel = user_tasks[user_id].copy()
+            for task in tasks_to_cancel:
+                try:
+                    if not task.done() and not task.cancelled():
+                        task.cancel()
+                        logging.info(f"Cancelled task for user {user_id}")
+                except Exception as e:
+                    logging.error(f"Error cancelling task: {str(e)}")
+            
+            # Clear the list
             user_tasks[user_id] = []
+            logging.info(f"Cleared all tasks for user {user_id}")
+            
+        # Find any PDF processing tasks in progress
+        # These might be running in asyncio tasks that aren't directly tracked in user_tasks
+        import asyncio
+        # Check all tasks in the event loop
+        for task in asyncio.all_tasks():
+            task_name = task.get_name()
+            # Look for PDF processing tasks that match the user ID
+            if f"pdf_processing_{user_id}" in task_name or f"process_pdf_{user_id}" in task_name:
+                try:
+                    if not task.done() and not task.cancelled():
+                        task.cancel()
+                        logging.info(f"Cancelled PDF processing task {task_name} for user {user_id}")
+                except Exception as e:
+                    logging.error(f"Error cancelling PDF task {task_name}: {str(e)}")
+                    
+        # Clear any data files associated with this user to prevent further processing
+        from src.utils.code_utils import DATA_FILES_DIR
+        try:
+            if os.path.exists(DATA_FILES_DIR):
+                for filename in os.listdir(DATA_FILES_DIR):
+                    if f"{user_id}_" in filename:
+                        file_path = os.path.join(DATA_FILES_DIR, filename)
+                        try:
+                            os.remove(file_path)
+                            logging.info(f"Removed data file: {file_path}")
+                        except Exception as e:
+                            logging.error(f"Error removing data file {file_path}: {str(e)}")
+        except Exception as e:
+            logging.error(f"Error cleaning up data files: {str(e)}")
+            
+        # Also clear any cached data for this user
+        if user_id in user_data_files:
+            del user_data_files[user_id]
+        
+        # Remove any chart data for this user
+        chart_ids_to_remove = []
+        for chart_id in user_charts:
+            if chart_id.startswith(f"{user_id}_"):
+                chart_ids_to_remove.append(chart_id)
+                
+        for chart_id in chart_ids_to_remove:
+            if chart_id in user_charts:
+                del user_charts[chart_id]
+                
+        if chart_ids_to_remove:
+            logging.info(f"Removed {len(chart_ids_to_remove)} charts for user {user_id}")
+            
+        logging.info(f"Completed stopping all tasks for user {user_id}")
             
     async def _run_chart_cleanup(self):
         """Run periodic chart cleanup to remove old chart data"""
@@ -1248,6 +1391,48 @@ except Exception as e:
                 
         except Exception as e:
             logging.error(f"Error cleaning up charts and data files: {str(e)}")
+            logging.error(traceback.format_exc())
+            
+    async def _run_file_cleanup(self):
+        """Run periodic cleanup of data files and visualization files"""
+        try:
+            while True:
+                # Clean up files older than 23 hours
+                try:
+                    # Clean up temp_data_files directory
+                    temp_data_dir = os.path.join(os.path.dirname(__file__), '..', 'temp_data_files')
+                    if os.path.exists(temp_data_dir):
+                        current_time = time.time()
+                        max_age = 23 * 3600  # 23 hours in seconds
+                        
+                        # List all files in the directory
+                        for filename in os.listdir(temp_data_dir):
+                            file_path = os.path.join(temp_data_dir, filename)
+                            try:
+                                # Check if file is older than max_age
+                                if os.path.isfile(file_path):
+                                    file_age = current_time - os.path.getmtime(file_path)
+                                    if file_age > max_age:
+                                        os.remove(file_path)
+                                        logging.info(f"Cleaned up old file: {filename}")
+                            except Exception as e:
+                                logging.error(f"Error cleaning up file {filename}: {str(e)}")
+                                continue
+                                
+                    # Also clean up any other temp files from code_utils
+                    from src.utils.code_utils import clean_old_files, DATA_FILES_DIR
+                    clean_old_files(max_age_hours=23)
+                    
+                except Exception as e:
+                    logging.error(f"Error in file cleanup task: {str(e)}")
+                    
+                await asyncio.sleep(3600)  # Check every hour
+                
+        except asyncio.CancelledError:
+            logging.info("File cleanup task was cancelled")
+            raise
+        except Exception as e:
+            logging.error(f"Error in file cleanup task: {str(e)}")
             logging.error(traceback.format_exc())
             
     async def close(self):

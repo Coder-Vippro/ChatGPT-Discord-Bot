@@ -10,6 +10,7 @@ from src.config.config import MODEL_OPTIONS, PDF_ALLOWED_MODELS
 from src.utils.image_utils import ImageGenerator
 from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
+from src.utils.openai_utils import prepare_file_from_path
 
 # Dictionary to keep track of user requests and their cooldowns
 user_requests = {}
@@ -78,6 +79,15 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                 await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
             await asyncio.sleep(1)  # Optional delay between processing
 
+    async def send_response_with_image(interaction: discord.Interaction, response_text: str, image_path: str):
+        """Send a response with an image file."""
+        try:
+            file = await prepare_file_from_path(image_path)
+            await interaction.followup.send(content=response_text, file=file)
+        except Exception as e:
+            logging.error(f"Error sending image: {str(e)}")
+            await interaction.followup.send(f"Error sending image: {str(e)}")
+    
     @tree.command(name="choose_model", description="Select the AI model to use for responses.")
     @check_blacklist()
     async def choose_model(interaction: discord.Interaction):
@@ -452,15 +462,36 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
     # Helper function to stop user tasks
     async def stop_user_tasks(user_id: int):
         """Stop all tasks for a specific user."""
+        logging.info(f"Stopping all tasks for user {user_id}")
+        
+        # Cancel all active tasks in user_tasks
         if user_id in user_tasks:
             for task in user_tasks[user_id]:
-                task.cancel()
+                try:
+                    task.cancel()
+                    logging.info(f"Cancelled task for user {user_id}")
+                except Exception as e:
+                    logging.error(f"Error cancelling task: {str(e)}")
             user_tasks[user_id] = []
         
         # Clear any queued requests
         if user_id in user_requests:
+            queue_size = user_requests[user_id]['queue'].qsize()
             while not user_requests[user_id]['queue'].empty():
                 try:
                     user_requests[user_id]['queue'].get_nowait()
-                except:
-                    pass
+                    user_requests[user_id]['queue'].task_done()
+                except Exception as e:
+                    logging.error(f"Error clearing queue: {str(e)}")
+            logging.info(f"Cleared {queue_size} queued requests for user {user_id}")
+        
+        # Also notify the message handler to stop any running PDF processes
+        # This is important for PDF batch processing which might be running in separate tasks
+        try:
+            # Import here to avoid circular imports
+            from src.module.message_handler import MessageHandler
+            if hasattr(MessageHandler, 'stop_user_tasks'):
+                await MessageHandler.stop_user_tasks(user_id)
+                logging.info(f"Called MessageHandler.stop_user_tasks for user {user_id}")
+        except Exception as e:
+            logging.error(f"Error stopping message handler tasks: {str(e)}")
