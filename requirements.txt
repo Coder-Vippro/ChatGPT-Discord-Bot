@@ -13,3 +13,8 @@ matplotlib
 pandas
 openpyxl
 seaborn
+tzlocal
+numpy
+scipy
+plotly
+nbformat
