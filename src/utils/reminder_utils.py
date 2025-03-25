@@ -4,8 +4,8 @@ import discord
 from datetime import datetime, timedelta
 import pytz
 import time
-import tzlocal
 from typing import Dict, Any, List, Optional, Union
+from src.config.config import TIMEZONE  # Import the TIMEZONE from config
 
 class ReminderManager:
     """
@@ -24,8 +24,12 @@ class ReminderManager:
         self.running = False
         self.check_task = None
         
-        # Get the server's local timezone
-        self.server_timezone = tzlocal.get_localzone()
+        # Use the timezone from .env file through config
+        try:
+            self.server_timezone = pytz.timezone(TIMEZONE)
+        except pytz.exceptions.UnknownTimeZoneError:
+            logging.warning(f"Invalid timezone '{TIMEZONE}' in .env, using UTC instead")
+            self.server_timezone = pytz.timezone("UTC")
         
         # Store user timezones (will be populated as users interact)
         self.user_timezones = {}

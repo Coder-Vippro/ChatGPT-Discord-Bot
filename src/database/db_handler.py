@@ -17,8 +17,6 @@ class DatabaseHandler:
         # Set up a connection pool with sensible timeouts
         self.client = AsyncIOMotorClient(
             mongodb_uri,
-            maxPoolSize=50,
-            minPoolSize=10,
             maxIdleTimeMS=45000,
             connectTimeoutMS=10000,
             serverSelectionTimeoutMS=15000,

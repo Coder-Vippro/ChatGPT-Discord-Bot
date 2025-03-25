@@ -157,6 +157,7 @@ GOOGLE_CX = os.getenv("GOOGLE_CX")
 RUNWARE_API_KEY = os.getenv("RUNWARE_API_KEY")
 MONGODB_URI = os.getenv("MONGODB_URI")
 ADMIN_ID = os.getenv("ADMIN_ID")  # Add ADMIN_ID if you're using it
+TIMEZONE = os.getenv("TIMEZONE", "UTC")  # Default to UTC if not specified
 
 # Print debug information if environment variables are not found
 if not DISCORD_TOKEN:

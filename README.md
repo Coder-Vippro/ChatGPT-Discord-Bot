@@ -1,26 +1,25 @@
 # ChatGPT Discord Bot
-
 ![Build and Push](https://github.com/coder-vippro/ChatGPT-Discord-Bot/actions/workflows/main.yml/badge.svg)
 
 ## Overview
-
-Welcome to **ChatGPT Discord Bot**! This bot is designed to interact with users on Discord, powered by OpenAI's models. It generates responses, creates images from prompts, fetches web content, and is containerized with Docker for smooth deployment. Continuous integration and deployment (CI/CD) are managed with GitHub Actions.
+Welcome to **ChatGPT Discord Bot**! This bot provides a powerful AI assistant for Discord users, powered by OpenAI's latest models. It not only generates text responses but also offers a range of advanced features including image generation, data analysis, web searching, and reminders. The bot is designed for easy deployment with Docker and includes CI/CD integration via GitHub Actions.
 
 ## Features
-
-- **Discord Integration**: Communicate directly with users on Discord.
-- **OpenAI Responses**: Provides intelligent responses using OpenAI models.
-- **Image Generation**: Generates images from prompts via Runware.
-- **Web Scraping**: Fetches and summarizes content from the web.
-- **Google Search**: Search the web directly from Discord.
-- **User Statistics**: Track token usage and model selection per user.
-- **Dockerized Deployment**: Ready for deployment with Docker and GHCR images.
-- **Automated CI/CD**: Integrated with GitHub Actions for CI/CD.
+- **Advanced AI Conversations**: Uses OpenAI's latest models (including GPT-4o) for natural language interactions
+- **Image Generation**: Creates custom images from text prompts using Runware's API
+- **Data Analysis**: Analyzes CSV and Excel files with visualizations (distributions, correlations, box plots, etc.)
+- **Code Interpretation**: Executes Python code for calculations and data processing
+- **Reminder System**: Sets timed reminders with custom timezone support
+- **Web Tools**:
+  - **Google Search**: Searches the web and provides relevant information
+  - **Web Scraping**: Extracts and summarizes content from websites
+- **PDF Analysis**: Processes and analyzes PDF documents
+- **User Statistics**: Tracks token usage and model selection per user
+- **Dockerized Deployment**: Ready for easy deployment with Docker
+- **Automated CI/CD**: Integrated with GitHub Actions
 
 ## Prerequisites
-
 To get started, ensure you have:
-
 - Docker (for containerized deployment)
 - Python 3.12.7
 - Discord Bot Token
@@ -30,11 +29,8 @@ To get started, ensure you have:
 - MongoDB URL (Get from https://cloud.mongodb.com/)
 
 ## Setup
-
 ### For Normal Use
-
 #### Option A: Deploy with Docker
-
 1. Create a `.env` file in the root directory with your configuration:
    ```properties
    DISCORD_TOKEN=your_discord_token
@@ -42,15 +38,15 @@ To get started, ensure you have:
    RUNWARE_API_KEY=your_runware_api_key
    GOOGLE_API_KEY=your_google_api_key
    GOOGLE_CX=your_google_cx
-   OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any openai compatible api else you want
+   OPENAI_BASE_URL=https://api.openai.com/v1/models
    MONGODB_URI=mongodb://localhost:27017/
    ADMIN_ID=your_discord_user_id
+   TIMEZONE=Asia/Ho_Chi_Minh
    ```
 
 2. Use the following `docker-compose.yml`:
    ```yaml
    version: '3.8'
-
    services:
      bot:
        image: ghcr.io/coder-vippro/chatgpt-discord-bot:latest
@@ -65,7 +61,6 @@ To get started, ensure you have:
    ```
 
 #### Option B: Deploy Without Docker
-
 1. Clone the repository:
    ```bash
    git clone https://github.com/Coder-Vippro/ChatGPT-Discord-Bot.git
@@ -79,9 +74,10 @@ To get started, ensure you have:
    RUNWARE_API_KEY=your_runware_api_key
    GOOGLE_API_KEY=your_google_api_key
    GOOGLE_CX=your_google_cx
-   OPENAI_BASE_URL=https://models.inference.ai.azure.com or https://api.openai.com/v1/models or any openai compatible api else you want
+   OPENAI_BASE_URL=https://api.openai.com/v1/models
    MONGODB_URI=mongodb://localhost:27017/
    ADMIN_ID=your_discord_user_id
+   TIMEZONE=Asia/Ho_Chi_Minh
    ```
 
 3. Install the dependencies:
@@ -95,7 +91,6 @@ To get started, ensure you have:
    ```
 
 ### For Development
-
 1. Clone the repository:
    ```bash
    git clone https://github.com/Coder-Vippro/ChatGPT-Discord-Bot.git
@@ -113,7 +108,6 @@ To get started, ensure you have:
    ```
 
 ### Running Tests
-
 1. Install test dependencies:
    ```bash
    pip install pytest
@@ -125,29 +119,54 @@ To get started, ensure you have:
    ```
 
 ## Usage
+Once the bot is running, it connects to Discord using credentials from `.env`. Available features include:
 
-Once the bot is running, it connects to Discord using credentials from `.env`. Commands available include:
+### Text Commands
+- **Normal chat**: Ping the bot with a question or send a DM to start a conversation
+- **Image Generation**: `/generate prompt: "A futuristic cityscape"`
+- **Web Content**: `/web url: "https://example.com"`
+- **Google Search**: `/search prompt: "latest news in Vietnam"`
+- **User Statistics**: `/user_stat` - Get your token usage and model information
 
-- **Generate Image**: `/generate prompt: "A futuristic cityscape"`
-- **Scrape Web Content**: `/web url: "https://example.com"`
-- **Search Google**: `/search prompt: "latest news in Vietnam"`
-- **Normal chat**: `Ping the bot with a question or send a DM to the bot to start`
-- **User Statistics**: `/user_stat` - Get your current input token, output token, and model.
+### Advanced Features
+- **Data Analysis**: Upload CSV or Excel files for automatic analysis and visualization
+- **Code Execution**: The bot can execute Python code to solve problems or create visualizations
+- **Reminders**: Ask the bot to set reminders like "Remind me to check email in 30 minutes"
+- **PDF Analysis**: Upload PDF documents for the bot to analyze and summarize
+
+### Available Models
+The bot supports the following models:
+- gpt-4o
+- gpt-4o-mini
+- o1-preview
+- o1-mini
+- o1
+- o3-mini
+
+## Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| DISCORD_TOKEN | Your Discord bot token | Required |
+| OPENAI_API_KEY | Your OpenAI API key | Required |
+| RUNWARE_API_KEY | Runware API key for image generation | Required |
+| GOOGLE_API_KEY | Google API key for search | Required | 
+| GOOGLE_CX | Google Custom Search Engine ID | Required |
+| MONGODB_URI | MongoDB connection string | Required |
+| ADMIN_ID | Discord user ID of the admin | Optional |
+| TIMEZONE | Timezone for reminder feature | UTC |
+| ENABLE_WEBHOOK_LOGGING | Enable webhook logging | False |
+| LOGGING_WEBHOOK_URL | URL for webhook logging | Optional |
 
 ## CI/CD
-
 This project uses GitHub Actions for CI/CD, with workflows in `.github/workflows`.
 
 ## Security
-
 For supported versions and vulnerability reporting, see [SECURITY.md](SECURITY.md).
 
 ## Contributing
-
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing to this project.
 
 ## License
-
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ---
