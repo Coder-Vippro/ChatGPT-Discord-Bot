@@ -58,27 +58,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and tag temporary Docker image for amd64
+      - name: Build Docker image for amd64
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
           load: true
           platforms: linux/amd64
-          tags: chatgpt-discord-bot:amd64-temp
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
 
-      - name: Install docker-slim
-        run: |
-          curl -sL https://raw.githubusercontent.com/docker-slim/docker-slim/master/scripts/install-dockerslim.sh | sudo -E bash -
+      - name: Slim Docker image for amd64
+        uses: docker-slim/docker-slim-action@v1
+        with:
+          target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
+          tag: ghcr.io/coder-vippro/chatgpt-discord-bot:slim-amd64
 
-      - name: Optimize Docker image with docker-slim
+      - name: Push slimmed Docker image for amd64
         run: |
-          docker-slim build --target chatgpt-discord-bot:amd64-temp --tag chatgpt-discord-bot:amd64-slim --http-probe=false --include-path /app --include-path /usr/local/lib/python3.12 --include-path /usr/local/lib/python3.13
-
-      - name: Tag and push optimized image
-        run: |
-          docker tag chatgpt-discord-bot:amd64-slim ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
-          docker push ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
+          docker push ghcr.io/coder-vippro/chatgpt-discord-bot:slim-amd64
 
   build-arm64:
     runs-on: ubuntu-24.04-arm
@@ -98,27 +94,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and tag temporary Docker image for arm64
+      - name: Build Docker image for arm64
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
           load: true
           platforms: linux/arm64
-          tags: chatgpt-discord-bot:arm64-temp
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
 
-      - name: Install docker-slim
-        run: |
-          curl -sL https://raw.githubusercontent.com/docker-slim/docker-slim/master/scripts/install-dockerslim.sh | sudo -E bash -
+      - name: Slim Docker image for arm64
+        uses: docker-slim/docker-slim-action@v1
+        with:
+          target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
+          tag: ghcr.io/coder-vippro/chatgpt-discord-bot:slim-arm64
 
-      - name: Optimize Docker image with docker-slim
+      - name: Push slimmed Docker image for arm64
         run: |
-          docker-slim build --target chatgpt-discord-bot:arm64-temp --tag chatgpt-discord-bot:arm64-slim --http-probe=false --include-path /app --include-path /usr/local/lib/python3.12 --include-path /usr/local/lib/python3.13
-
-      - name: Tag and push optimized image
-        run: |
-          docker tag chatgpt-discord-bot:arm64-slim ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
-          docker push ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
+          docker push ghcr.io/coder-vippro/chatgpt-discord-bot:slim-arm64
 
   merge-manifest:
     runs-on: ubuntu-latest
@@ -134,8 +126,8 @@ jobs:
       - name: Create and push multi-arch manifest
         run: |
           docker buildx imagetools create -t ghcr.io/coder-vippro/chatgpt-discord-bot:latest \
-            ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64 \
-            ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
+            ghcr.io/coder-vippro/chatgpt-discord-bot:slim-amd64 \
+            ghcr.io/coder-vippro/chatgpt-discord-bot:slim-arm64
 
   deploy-notification:
     runs-on: ubuntu-latest
@@ -148,8 +140,8 @@ jobs:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           title: "✅ New deployment successful!"
           description: |
-            Repository: ${{ github.repository }}
+            Image: ghcr.io/coder-vippro/chatgpt-discord-bot:latest
             Commit: ${{ github.sha }}
-            Optimized images deployed successfully!
+            Repository: ${{ github.repository }}
           color: 0x00ff00
           username: GitHub Actions
