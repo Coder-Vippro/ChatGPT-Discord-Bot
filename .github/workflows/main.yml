@@ -58,32 +58,43 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build the Docker image first without pushing
-      - name: Build Docker image for amd64
+      - name: Build and push Docker image for amd64
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
+          push: true
           platforms: linux/amd64
-          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
-          load: true
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64-fat
+          cache-from: type=gha,scope=docker-build-cache
+          cache-to: type=gha,mode=max,scope=docker-build-cache
 
-      # Apply Docker Slim to reduce image size
-      - name: Slim Docker image
-        uses: kitabisa/docker-slim-action@v1
-        env:
-          DSLIM_HTTP_PROBE: false
-        with:
-          target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
-          tag: "latest-amd64-slim"
-          include-path: "/usr/local/lib/python*/site-packages/"
-          include-path: "/usr/lib/python*/site-packages/"
-          exec: "python -c 'import sys; print(sys.path)'"
-
-      # Push the slimmed image to registry
-      - name: Push Docker image to registry
+      - name: Install SlimToolkit
         run: |
-          docker tag ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64-slim ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
+          curl -sL https://raw.githubusercontent.com/slimtoolkit/slim/master/scripts/install-slim.sh | sudo -E bash -
+
+      - name: Pull image locally for slimming
+        run: docker pull ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64-fat
+
+      - name: Slim the Docker image
+        run: |
+          slim build --target ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64-fat \
+            --tag ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64 \
+            --http-probe=false \
+            --include-path=/usr/local/bin \
+            --include-path=/usr/local/lib/python3.13 \
+            --include-path=/app \
+            --include-path=/usr/lib \
+            --include-bin=/usr/local/bin/python3.13 \
+            --include-bin=/usr/local/bin/pip \
+            --preserve-path=/etc/ssl/certs \
+            --cmd="python3 /app/bot.py"
+
+      - name: Display image sizes comparison
+        run: |
+          docker images | grep chatgpt-discord-bot
+
+      - name: Push slimmed image
+        run: |
           docker push ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
 
   build-arm64:
@@ -104,32 +115,43 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build the Docker image first without pushing
-      - name: Build Docker image for arm64
+      - name: Build and push Docker image for arm64
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
+          push: true
           platforms: linux/arm64
-          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
-          load: true
-
-      # Apply Docker Slim to reduce image size
-      - name: Slim Docker image
-        uses: kitabisa/docker-slim-action@v1
-        env:
-          DSLIM_HTTP_PROBE: false
-        with:
-          target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
-          tag: "latest-arm64-slim"
-          include-path: "/usr/local/lib/python*/site-packages/"
-          include-path: "/usr/lib/python*/site-packages/"
-          exec: "python -c 'import sys; print(sys.path)'"
-
-      # Push the slimmed image to registry
-      - name: Push Docker image to registry
+          tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64-fat
+          cache-from: type=gha,scope=docker-build-cache
+          cache-to: type=gha,mode=max,scope=docker-build-cache
+      
+      - name: Install SlimToolkit
         run: |
-          docker tag ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64-slim ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
+          curl -sL https://raw.githubusercontent.com/slimtoolkit/slim/master/scripts/install-slim.sh | sudo -E bash -
+
+      - name: Pull image locally for slimming
+        run: docker pull ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64-fat
+
+      - name: Slim the Docker image
+        run: |
+          slim build --target ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64-fat \
+            --tag ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64 \
+            --http-probe=false \
+            --include-path=/usr/local/bin \
+            --include-path=/usr/local/lib/python3.13 \
+            --include-path=/app \
+            --include-path=/usr/lib \
+            --include-bin=/usr/local/bin/python3.13 \
+            --include-bin=/usr/local/bin/pip \
+            --preserve-path=/etc/ssl/certs \
+            --cmd="python3 /app/bot.py"
+
+      - name: Display image sizes comparison
+        run: |
+          docker images | grep chatgpt-discord-bot
+
+      - name: Push slimmed image
+        run: |
           docker push ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
 
   merge-manifest:
