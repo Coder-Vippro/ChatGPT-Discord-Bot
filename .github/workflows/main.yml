@@ -76,6 +76,11 @@ jobs:
         with:
           target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
           tag: "latest-amd64-slim"
+          include-path: 
+            - "/usr/local/lib/python*/site-packages/"
+            - "/usr/lib/python*/site-packages/"
+            - "/usr/lib/python*/site-packages/"
+          exec: "python -c 'import sys; print(sys.path)'"
 
       # Push the slimmed image to registry
       - name: Push Docker image to registry
@@ -119,6 +124,9 @@ jobs:
         with:
           target: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
           tag: "latest-arm64-slim"
+          include-path: "/usr/local/lib/python*/site-packages/"
+          include-path: "/usr/lib/python*/site-packages/"
+          exec: "python -c 'import sys; print(sys.path)'"
 
       # Push the slimmed image to registry
       - name: Push Docker image to registry
