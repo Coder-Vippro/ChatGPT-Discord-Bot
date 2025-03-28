@@ -22,9 +22,8 @@ RUN pip install --user --no-cache-dir -r requirements.txt && \
     find /root/.local -type d -name "__pycache__" -exec rm -rf {} \; 2>/dev/null || true && \
     find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true && \
     find /root/.local -type f -name "*.pyo" -delete 2>/dev/null || true && \
-    find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true
-
-
+    find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true && \
+    mkdir -p /root/.local/bin
 
 # Stage 2: Runtime environment
 FROM python:3.13.2-alpine AS runtime
@@ -40,9 +39,18 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 # Set working directory
 WORKDIR /home/appuser/app
 
+# Create target directories first
+RUN mkdir -p /home/appuser/.local/lib /home/appuser/.local/bin
+
 # Copy Python packages from builder stage (only necessary folders)
-COPY --from=builder --chown=appuser:appgroup /root/.local/lib /home/appuser/.local/lib
-COPY --from=builder --chown=appuser:appgroup /root/.local/bin /home/appuser/.local/bin
+COPY --from=builder --chown=appuser:appgroup /root/.local/lib /home/appuser/.local/lib/
+
+# Fix for bin directory copy - use a safer approach
+RUN mkdir -p /home/appuser/.local/bin
+# Workaround to safely copy bin directory contents if they exist
+RUN if [ -d "/root/.local/bin" ] && [ -n "$(ls -A /root/.local/bin 2>/dev/null)" ]; then \
+    cp -r /root/.local/bin/* /home/appuser/.local/bin/ 2>/dev/null || true; \
+    fi
 
 # Copy application source code
 COPY --chown=appuser:appgroup bot.py .
