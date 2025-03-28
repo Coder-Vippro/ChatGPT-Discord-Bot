@@ -8,8 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MAKEFLAGS="-j$(nproc)" \
     PATH="/root/.local/bin:$PATH"
 
-# Install only required build dependencies
-RUN apk add --no-cache gcc musl-dev python3-dev libffi-dev openssl-dev
+# Install required build dependencies including file and binutils (for strip)
+RUN apk add --no-cache gcc musl-dev python3-dev libffi-dev openssl-dev file binutils
 
 # Set working directory
 WORKDIR /app
@@ -17,12 +17,14 @@ WORKDIR /app
 # Copy only requirements file for better Docker caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install Python dependencies with simplified cleanup
 RUN pip install --user --no-cache-dir -r requirements.txt && \
-    find /root/.local -type d -name "__pycache__" -exec rm -rf {} + && \
-    find /root/.local -type f -name "*.pyc" -delete && \
-    find /root/.local -type f -name "*.pyo" -delete && \
-    find /root/.local -type f -name "*.so*" -exec sh -c 'file "{}" | grep -q ELF && strip -s "{}"' \;
+    find /root/.local -type d -name "__pycache__" -exec rm -rf {} \; 2>/dev/null || true && \
+    find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true && \
+    find /root/.local -type f -name "*.pyo" -delete 2>/dev/null || true && \
+    find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true
+
+
 
 # Stage 2: Runtime environment
 FROM python:3.13.2-alpine AS runtime
