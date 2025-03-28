@@ -65,8 +65,6 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-amd64
-          cache-from: type=gha,scope=docker-build-cache
-          cache-to: type=gha,mode=max,scope=docker-build-cache
 
   build-arm64:
     runs-on: ubuntu-24.04-arm
@@ -93,8 +91,6 @@ jobs:
           push: true
           platforms: linux/arm64
           tags: ghcr.io/coder-vippro/chatgpt-discord-bot:latest-arm64
-          cache-from: type=gha,scope=docker-build-cache
-          cache-to: type=gha,mode=max,scope=docker-build-cache
 
   merge-manifest:
     runs-on: ubuntu-latest
