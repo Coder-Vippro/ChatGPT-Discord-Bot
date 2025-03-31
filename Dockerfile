@@ -9,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/root/.local/bin:$PATH"
 
 # Install required build dependencies including file and binutils (for strip)
-RUN apk add --no-cache gcc musl-dev python3-dev libffi-dev openssl-dev file binutils g++
+RUN apk add --no-cache gcc musl-dev python3-dev libffi-dev openssl-dev file binutils g++ rust cargo
 
 # Set working directory
 WORKDIR /app
