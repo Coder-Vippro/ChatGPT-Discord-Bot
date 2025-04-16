@@ -5,7 +5,7 @@
 Welcome to **ChatGPT Discord Bot**! This bot provides a powerful AI assistant for Discord users, powered by OpenAI's latest models. It not only generates text responses but also offers a range of advanced features including image generation, data analysis, web searching, and reminders. The bot is designed for easy deployment with Docker and includes CI/CD integration via GitHub Actions.
 
 ## Features
-- **Advanced AI Conversations**: Uses OpenAI's latest models (including GPT-4o) for natural language interactions
+- **Advanced AI Conversations**: Uses OpenAI's latest models (including openai/gpt-4o) for natural language interactions
 - **Image Generation**: Creates custom images from text prompts using Runware's API
 - **Data Analysis**: Analyzes CSV and Excel files with visualizations (distributions, correlations, box plots, etc.)
 - **Code Interpretation**: Executes Python code for calculations and data processing
@@ -136,12 +136,12 @@ Once the bot is running, it connects to Discord using credentials from `.env`. A
 
 ### Available Models
 The bot supports the following models:
-- gpt-4o
-- gpt-4o-mini
-- o1-preview
-- o1-mini
-- o1
-- o3-mini
+- openai/gpt-4o
+- openai/gpt-4o-mini
+- openai/o1-preview
+- openai/o1-mini
+- openai/o1
+- openai/o3-mini
 
 ## Environment Variables
 | Variable | Description | Default |

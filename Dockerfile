@@ -1,61 +1,49 @@
 # Stage 1: Build dependencies
-FROM python:3.13.2-alpine AS builder
+FROM python:3.14-alpine AS builder
 
 # Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    MAKEFLAGS="-j$(nproc)" \
-    PATH="/root/.local/bin:$PATH"
+    MAKEFLAGS="-j$(nproc)"
 
-# Install required build dependencies including file and binutils (for strip)
+# Install required build dependencies
 RUN apk add --no-cache gcc musl-dev python3-dev libffi-dev openssl-dev file binutils g++ rust cargo
 
-# Set working directory
 WORKDIR /app
 
-# Copy only requirements file for better Docker caching
+# Copy only requirements file for better caching
 COPY requirements.txt .
 
-# Install Python dependencies with simplified cleanup
+# Install Python dependencies and clean up in a single layer
 RUN pip install --user --no-cache-dir -r requirements.txt && \
-    find /root/.local -type d -name "__pycache__" -exec rm -rf {} \; 2>/dev/null || true && \
-    find /root/.local -type f -name "*.pyc" -delete 2>/dev/null || true && \
-    find /root/.local -type f -name "*.pyo" -delete 2>/dev/null || true && \
-    find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true && \
-    mkdir -p /root/.local/bin
+    find /root/.local -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /root/.local -type f -name "*.py[co]" -delete && \
+    find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true
 
 # Stage 2: Runtime environment
-FROM python:3.13.2-alpine AS runtime
+FROM python:3.14-alpine AS runtime
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/home/appuser/.local/bin:$PATH"
 
-# Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# Create non-root user and necessary directories
+RUN addgroup -S appgroup && \
+    adduser -S appuser -G appgroup && \
+    mkdir -p /home/appuser/.local/lib /home/appuser/.local/bin && \
+    chown -R appuser:appgroup /home/appuser
 
-# Set working directory
 WORKDIR /home/appuser/app
 
-# Create target directories first
-RUN mkdir -p /home/appuser/.local/lib /home/appuser/.local/bin
-
-# Copy Python packages from builder stage (only necessary folders)
-COPY --from=builder --chown=appuser:appgroup /root/.local/lib /home/appuser/.local/lib/
-
-# Fix for bin directory copy - use a safer approach
-RUN mkdir -p /home/appuser/.local/bin
-# Workaround to safely copy bin directory contents if they exist
-RUN if [ -d "/root/.local/bin" ] && [ -n "$(ls -A /root/.local/bin 2>/dev/null)" ]; then \
-    cp -r /root/.local/bin/* /home/appuser/.local/bin/ 2>/dev/null || true; \
-    fi
+# Copy Python packages from builder stage
+COPY --from=builder --chown=appuser:appgroup /root/.local/ /home/appuser/.local/
 
 # Copy application source code
 COPY --chown=appuser:appgroup bot.py .
 COPY --chown=appuser:appgroup src/ ./src/
-COPY --chown=appuser:appgroup logs ./logs/
+COPY --chown=appuser:appgroup logs/ ./logs/
+
 # Use non-root user
 USER appuser
 

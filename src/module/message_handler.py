@@ -511,15 +511,15 @@ class MessageHandler:
                 
                 # Get history and model preferences first    
                 history = await self.db.get_history(user_id)
-                model = await self.db.get_user_model(user_id) or "gpt-4o"  # Default to gpt-4o if no model set
+                model = await self.db.get_user_model(user_id) or "openai/gpt-4.1-mini"  # Default to openai/gpt-4.1-mini if no model set
                 
                 # Handle PDF files
                 if message.attachments:
                     for attachment in message.attachments:
                         if attachment.filename.lower().endswith('.pdf'):
                             # Check if user is allowed to process PDFs
-                            if model not in ["gpt-4o", "gpt-4o-mini"]:
-                                await message.channel.send("PDF processing is only available with gpt-4o and gpt-4o-mini models. Please use /choose_model to select a supported model.")
+                            if model not in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
+                                await message.channel.send("PDF processing is only available with openai/gpt-4o and openai/gpt-4o-mini models. Please use /choose_model to select a supported model.")
                                 return
                                 
                             if not await self.db.is_admin(user_id) and not await self.db.is_user_whitelisted(user_id):
@@ -645,7 +645,7 @@ class MessageHandler:
             messages_for_api = []
             
             # For models that don't support system prompts
-            if model in ["o1-mini", "o1-preview"]:
+            if model in ["openai/o1-mini", "openai/o1-preview"]:
                 # Convert system messages to user instructions
                 system_content = None
                 history_without_system = []
@@ -676,15 +676,15 @@ class MessageHandler:
                 messages_for_api = prepare_messages_for_api(history)
             
             # Determine which models should have tools available
-            # o1-mini and o1-preview do not support tools
-            use_tools = model in ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
+            # openai/openai/o1-mini and openai/openai/o1-preview do not support tools
+            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o3-mini"]
             
             # Prepare API call parameters
             api_params = {
                 "model": model,
                 "messages": messages_for_api,
-                "temperature": 0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
-                "top_p": 0.7 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                "temperature": 0.3 if model in ["openai/gpt-4o", "openai/openai/gpt-4o-mini"] else 1,
+                "top_p": 0.7 if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else 1,
                 "timeout": 60  # Add an explicit timeout
             }
             
@@ -804,7 +804,7 @@ class MessageHandler:
                     response = await self._retry_api_call(lambda: self.client.chat.completions.create(
                         model=model,
                         messages=updated_messages,
-                        temperature=0.3 if model in ["gpt-4o", "gpt-4o-mini"] else 1,
+                        temperature=0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else 1,
                         timeout=60
                     ))
             
@@ -827,8 +827,8 @@ class MessageHandler:
                     })
             
             # Store the response in history for models that support it
-            if model in ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o3-mini"]:
-                if model in ["o1-mini", "o1-preview"]:
+            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o1-mini", "openai/o3-mini"]:
+                if model in ["openai/o1-mini", "openai/o1-preview"]:
                     # For models without system prompt support, keep track separately
                     if has_images:
                         history_without_system.append({"role": "assistant", "content": content_with_images})
@@ -1068,6 +1068,59 @@ class MessageHandler:
                 return await call_func()
             except Exception as e:
                 last_error = e
+                
+                # Check for 413 error (payload too large)
+                error_str = str(e).lower()
+                if '413' in error_str and ('entity too large' in error_str or 'exceeds the capacity limit' in error_str):
+                    # Find the user_id from current task
+                    current_task = asyncio.current_task()
+                    user_id = None
+                    discord_message = None
+                    
+                    for uid, tasks in user_tasks.items():
+                        if current_task in tasks:
+                            user_id = uid
+                            # Look for message context in task info
+                            for task_info in tasks:
+                                if isinstance(task_info, dict) and 'message' in task_info:
+                                    discord_message = task_info['message']
+                                    break
+                            break
+                    
+                    if user_id and discord_message:
+                        logging.warning(f"413 Error detected for user {user_id}. Clearing history.")
+                        try:
+                            # Clear history but preserve system message
+                            history = await self.db.get_history(user_id)
+                            if history:
+                                system_msg = None
+                                # Extract system message if exists
+                                for msg in history:
+                                    if msg.get('role') == 'system':
+                                        system_msg = msg
+                                        break
+                                
+                                # Clear history but keep system message if found
+                                new_history = []
+                                if system_msg:
+                                    new_history.append(system_msg)
+                                
+                                # Save the reset history
+                                await self.db.save_history(user_id, new_history)
+                                
+                                # Send a helpful message to the user
+                                await discord_message.channel.send(
+                                    "⚠️ Your conversation history was too large for processing. "
+                                    "I've cleared your previous messages to fix this issue. "
+                                    "Please try your request again."
+                                )
+                                
+                                # Re-raise to exit this request's processing
+                                raise e
+                        except Exception as clear_error:
+                            logging.error(f"Error clearing history after 413 error: {str(clear_error)}")
+                
+                # Normal retry processing
                 retries += 1
                 if retries >= max_retries:
                     break
@@ -2128,5 +2181,6 @@ class MessageHandler:
                 "error": error_msg,
                 "prompt": prompt
             })
+
 
 

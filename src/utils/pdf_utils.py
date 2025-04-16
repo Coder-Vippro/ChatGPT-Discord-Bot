@@ -144,7 +144,7 @@ async def process_pdf_batch(model: str, client, user_prompt: str, batch_content:
             formatted_user_prompt = f"USER QUESTION: {user_prompt}"
             
             messages = []
-            if model in ["o1-mini", "o1-preview"]:
+            if model in ["openai/o1-mini", "openai/o1-preview"]:
                 # These models don't support system prompts
                 messages = [
                     {"role": "user", "content": f"Instructions: {PDF_ANALYSIS_PROMPT}\n\n{formatted_user_prompt}\n\nAnalyze the following content with specific focus on addressing the user's question:\n{trimmed_content}"}

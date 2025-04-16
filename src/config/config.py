@@ -6,7 +6,7 @@ load_dotenv()
 
 # Bot statuses
 STATUSES = [
-    "Powered by GPT-4o!",
+    "Powered by openai/gpt-4o!",
     "Generating creative text!",
     "Creating images on demand!",
     "Answering your queries with AI!",
@@ -62,18 +62,18 @@ STATUSES = [
 
 # List of available models
 MODEL_OPTIONS = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "o1-preview",
-    "o1-mini",
-    "o1",
-    "o3-mini",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "openai/o1-preview",
+    "openai/o1-mini",
+    "openai/o1",
+    "openai/o3-mini",
     "openai/gpt-4.1",
     "openai/gpt-4.1-nano",
     "openai/gpt-4.1-mini"
 ]
 
-PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]
+PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini"]
 PDF_BATCH_SIZE = 3
 
 # Prompt templates

@@ -165,29 +165,29 @@ class TestDatabaseHandler(unittest.IsolatedAsyncioTestCase):
     async def test_user_model_operations(self):
         if self.using_real_db:
             # Save a model and then retrieve it
-            await self.db_handler.save_user_model(12345, 'gpt-4o')
+            await self.db_handler.save_user_model(12345, 'openai/gpt-4o')
             model = await self.db_handler.get_user_model(12345)
-            self.assertEqual(model, 'gpt-4o')
+            self.assertEqual(model, 'openai/gpt-4o')
             
             # Test updating model
-            await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
+            await self.db_handler.save_user_model(12345, 'openai/gpt-4o-mini')
             updated_model = await self.db_handler.get_user_model(12345)
-            self.assertEqual(updated_model, 'gpt-4o-mini')
+            self.assertEqual(updated_model, 'openai/gpt-4o-mini')
         else:
             # Setup mock for user_models collection
             # Use self.mock_models instead of creating a new mock
-            self.mock_models.find_one = AsyncMock(return_value={'user_id': 12345, 'model': 'gpt-4o'})
+            self.mock_models.find_one = AsyncMock(return_value={'user_id': 12345, 'model': 'openai/gpt-4o'})
             self.mock_models.update_one = AsyncMock()
             
             # Test getting user model
             model = await self.db_handler.get_user_model(12345)
-            self.assertEqual(model, 'gpt-4o')
+            self.assertEqual(model, 'openai/gpt-4o')
             
             # Test saving user model
-            await self.db_handler.save_user_model(12345, 'gpt-4o-mini')
+            await self.db_handler.save_user_model(12345, 'openai/gpt-4o-mini')
             self.mock_models.update_one.assert_called_once_with(
                 {'user_id': 12345},
-                {'$set': {'model': 'gpt-4o-mini'}},
+                {'$set': {'model': 'openai/gpt-4o-mini'}},
                 upsert=True
             )
 
