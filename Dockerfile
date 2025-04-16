@@ -55,7 +55,7 @@ RUN if [ -d "/root/.local/bin" ] && [ -n "$(ls -A /root/.local/bin 2>/dev/null)"
 # Copy application source code
 COPY --chown=appuser:appgroup bot.py .
 COPY --chown=appuser:appgroup src/ ./src/
-COPY --chown=appuser:appgroup logs .
+COPY --chown=appuser:appgroup logs ./logs/
 # Use non-root user
 USER appuser
 
