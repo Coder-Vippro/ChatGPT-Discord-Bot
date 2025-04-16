@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies
-FROM python:3.14-alpine AS builder
+FROM python:3.13.3-alpine AS builder
 
 # Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -22,7 +22,7 @@ RUN pip install --user --no-cache-dir -r requirements.txt && \
     find /root/.local -type f -name "*.so*" -exec strip -s {} \; 2>/dev/null || true
 
 # Stage 2: Runtime environment
-FROM python:3.14-alpine AS runtime
+FROM python:3.13.3-alpine AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
