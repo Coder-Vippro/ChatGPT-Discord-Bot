@@ -75,14 +75,20 @@ class MessageHandler:
         # Initialize reminder manager
         self.reminder_manager = ReminderManager(bot, db_handler)
         
-        # Tool functions mapping
-        self.tool_functions = {
+        # Tool mapping for API integration
+        self.tool_mapping = {
             "google_search": self._google_search,
             "scrape_webpage": self._scrape_webpage,
             "code_interpreter": self._code_interpreter,
             "generate_image": self._generate_image,
+            "edit_image": self._edit_image,
             "set_reminder": self._set_reminder,
-            "get_reminders": self._get_reminders
+            "get_reminders": self._get_reminders,
+            "enhance_prompt": self._enhance_prompt,
+            "image_to_text": self._image_to_text,
+            "upscale_image": self._upscale_image,
+            "photo_maker": self._photo_maker,
+            "generate_image_with_refiner": self._generate_image_with_refiner
         }
         
         # Thread pool for CPU-bound tasks
@@ -306,13 +312,22 @@ class MessageHandler:
         
         # Create and track a new task for this message
         task = asyncio.create_task(self._process_user_message(message))
+        
+        # Store the message object with the task for future reference
+        task_info = {'message': message}
         user_tasks[user_id].append(task)
+        user_tasks[user_id].append(task_info)  # This allows tools to find the original message
         
         # Use done callbacks to clean up and handle errors
         def task_done_callback(task):
             # Remove task from tracking list
             if user_id in user_tasks and task in user_tasks[user_id]:
                 user_tasks[user_id].remove(task)
+                # Also try to remove the task_info if it exists
+                for item in list(user_tasks[user_id]):
+                    if isinstance(item, dict) and 'message' in item:
+                        user_tasks[user_id].remove(item)
+                        break
             
             # Check for exceptions that weren't handled
             if task.done() and not task.cancelled():
@@ -694,10 +709,21 @@ class MessageHandler:
                 
                 # Track which tools are being called
                 for tool_call in tool_calls:
-                    if tool_call.function.name in self.tool_functions:
+                    if tool_call.function.name in self.tool_mapping:
                         tool_messages[tool_call.function.name] = True
                         if tool_call.function.name == "generate_image":
                             image_generation_used = True
+                        elif tool_call.function.name == "edit_image":
+                            # Display appropriate message for image editing
+                            await message.channel.send("🖌️ Editing image...")
+                            # Check if operation is specified in arguments
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                operation = args.get("operation", "remove_background")
+                                operation_name = operation.replace("_", " ").title()
+                                await message.channel.send(f"Applying {operation_name}...")
+                            except:
+                                pass
                 
                 # Display appropriate messages based on which tools are being called
                 if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
@@ -720,7 +746,7 @@ class MessageHandler:
                     self.client, 
                     response, 
                     messages_for_api, 
-                    self.tool_functions
+                    self.tool_mapping
                 )
                 
                 # Process tool responses to extract important data (images, charts)
@@ -741,6 +767,26 @@ class MessageHandler:
                                         logging.info(f"Found {len(data['image_urls'])} image URLs in tool response")
                             except Exception as e:
                                 logging.error(f"Error parsing image URLs: {str(e)}")
+                        
+                        elif msg.get('role') == 'tool' and msg.get('name') == 'edit_image':
+                            try:
+                                content = msg.get('content', '')
+                                if isinstance(content, str) and '{' in content:
+                                    data = json.loads(content)
+                                    # Check for Discord image URLs
+                                    if 'discord_image_urls' in data and data['discord_image_urls']:
+                                        for url in data['discord_image_urls']:
+                                            if url not in image_urls:
+                                                image_urls.append(url)
+                                        logging.info(f"Found {len(data['discord_image_urls'])} edited image URLs in tool response")
+                                    # Also check regular image URLs in case that's all we have
+                                    elif 'image_urls' in data and data['image_urls']:
+                                        for url in data['image_urls']:
+                                            if url not in image_urls:
+                                                image_urls.append(url)
+                                        logging.info(f"Found {len(data['image_urls'])} edited image URLs in tool response")
+                            except Exception as e:
+                                logging.error(f"Error parsing edited image URLs: {str(e)}")
                         
                         elif msg.get('role') == 'tool' and msg.get('name') == 'code_interpreter':
                             try:
@@ -764,11 +810,31 @@ class MessageHandler:
             
             reply = response.choices[0].message.content
             
+            # Add image URLs to assistant content if any were found
+            has_images = len(image_urls) > 0
+            content_with_images = []
+            
+            if has_images:
+                # If we have image URLs, create a content array with text and images
+                content_with_images.append({"type": "text", "text": reply})
+                
+                # Add each image URL to the content
+                for img_url in image_urls:
+                    content_with_images.append({
+                        "type": "image_url",
+                        "image_url": {"url": img_url},
+                        "timestamp": datetime.now().isoformat()
+                    })
+            
             # Store the response in history for models that support it
             if model in ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini", "o3-mini"]:
                 if model in ["o1-mini", "o1-preview"]:
                     # For models without system prompt support, keep track separately
-                    history_without_system.append({"role": "assistant", "content": reply})
+                    if has_images:
+                        history_without_system.append({"role": "assistant", "content": content_with_images})
+                    else:
+                        history_without_system.append({"role": "assistant", "content": reply})
+                    
                     # Sync back to regular history format by preserving system message
                     new_history = []
                     if system_content:
@@ -782,7 +848,10 @@ class MessageHandler:
                     await self.db.save_history(user_id, new_history)
                 else:
                     # For models with system prompt support, just append to regular history
-                    history.append({"role": "assistant", "content": reply})
+                    if has_images:
+                        history.append({"role": "assistant", "content": content_with_images})
+                    else:
+                        history.append({"role": "assistant", "content": reply})
                     
                     # Only keep a reasonable amount of history
                     if len(history) > 20:  # Truncate to last 20 messages if too long
@@ -1094,6 +1163,116 @@ class MessageHandler:
                 return json.dumps({"error": result.get("error", "Unknown error")})
         except Exception as e:
             return json.dumps({"error": str(e), "prompt": prompt})
+    
+    async def _edit_image(self, args: Dict[str, Any]):
+        """
+        Execute image editing tool function (like background removal).
+        
+        Args:
+            args: Arguments containing image_url and optional operation
+            
+        Returns:
+            str: JSON string with edited image information
+        """
+        image_url = args.get("image_url", "")
+        operation = args.get("operation", "remove_background")
+        
+        if not image_url:
+            return json.dumps({"error": "No image URL provided"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the image with the requested operation
+            result = await self.image_generator.edit_image(image_url, operation)
+            
+            if result["success"]:
+                # If we have a message context and binary images, send them to Discord
+                edited_image_urls = []
+                
+                for i, img_data in enumerate(result["binary_images"]):
+                    try:
+                        # Send the edited image directly to Discord
+                        operation_name = operation.replace("_", " ").title()
+                        sent_message = await discord_message.channel.send(
+                            f"🖼️ {operation_name} result:",
+                            file=discord.File(io.BytesIO(img_data), filename=f"edited_image_{i+1}.png")
+                        )
+                        
+                        # Store the URL if available
+                        if sent_message.attachments and len(sent_message.attachments) > 0:
+                            edited_image_urls.append(sent_message.attachments[0].url)
+                    except Exception as e:
+                        logging.error(f"Error sending edited image: {str(e)}")
+                
+                # Add any newly sent image URLs to the result
+                if edited_image_urls:
+                    result["discord_image_urls"] = edited_image_urls
+                    
+                    # Find the most recent assistant message in history and append the image URLs as text
+                    if user_id is not None:
+                        history = await self.db.get_history(user_id)
+                        if history and len(history) > 0:
+                            # Find the most recent assistant message
+                            for i in range(len(history) - 1, -1, -1):
+                                if history[i].get("role") == "assistant":
+                                    # Append image URLs as plain text
+                                    images_text = "\n\nProcessed images:"
+                                    for j, url in enumerate(edited_image_urls):
+                                        images_text += f"\n• Image {j+1}: {url}"
+                                    
+                                    # If content is already a list
+                                    if isinstance(history[i]["content"], list):
+                                        # Find the text item and append to it
+                                        for item in history[i]["content"]:
+                                            if item.get("type") == "text":
+                                                item["text"] += images_text
+                                                break
+                                        else:
+                                            # If no text item found, add a new one
+                                            history[i]["content"].append({
+                                                "type": "text",
+                                                "text": images_text
+                                            })
+                                    else:
+                                        # Convert string content to text with appended URLs
+                                        history[i]["content"] += images_text
+                                    
+                                    # Save updated history
+                                    await self.db.save_history(user_id, history)
+                                    break
+                
+                return json.dumps({
+                    "message": f"Successfully {operation.replace('_', ' ')}ed image",
+                    "image_urls": result["image_urls"],
+                    "operation": operation,
+                    "discord_image_urls": result.get("discord_image_urls", [])
+                })
+            else:
+                return json.dumps({
+                    "error": result.get("error", f"Unknown error during {operation}"),
+                    "operation": operation
+                })
+        except Exception as e:
+            error_msg = f"Error in image editing: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "operation": operation
+            })
     
     async def _analyze_data_file(self, args: Dict[str, Any]) -> str:
         """
@@ -1454,5 +1633,500 @@ class MessageHandler:
         
         # Shutdown thread pool
         self.thread_pool.shutdown(wait=True)
+    
+    async def _enhance_prompt(self, args: Dict[str, Any]):
+        """
+        Execute prompt enhancement tool function.
+        
+        Args:
+            args: Arguments containing the prompt and enhancement parameters
+            
+        Returns:
+            str: JSON string with enhanced prompt information
+        """
+        prompt = args.get("prompt", "")
+        num_versions = min(int(args.get("num_versions", 3)), 5)
+        max_length = int(args.get("max_length", 100))
+        
+        if not prompt:
+            return json.dumps({"error": "No prompt provided for enhancement"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the prompt enhancement
+            result = await self.image_generator.enhance_prompt(prompt, num_versions, max_length)
+            
+            if result["success"]:
+                # Format enhanced prompts for response
+                enhanced_prompts = result.get("enhanced_prompts", [])
+                formatted_response = {
+                    "message": f"Successfully enhanced prompt with {len(enhanced_prompts)} variations",
+                    "original_prompt": prompt,
+                    "enhanced_prompts": enhanced_prompts,
+                    "prompt_count": len(enhanced_prompts)
+                }
+                
+                # If we have a message context, send the enhanced prompts directly in Discord
+                if discord_message and enhanced_prompts:
+                    try:
+                        prompt_message = "**Enhanced Prompt Variations:**\n\n"
+                        for i, enhanced in enumerate(enhanced_prompts, 1):
+                            prompt_message += f"**{i}.** {enhanced}\n\n"
+                        
+                        await discord_message.channel.send(prompt_message)
+                    except Exception as e:
+                        logging.error(f"Error sending enhanced prompts: {str(e)}")
+                
+                return json.dumps(formatted_response)
+            else:
+                return json.dumps({
+                    "error": result.get("error", "Unknown error enhancing prompt"),
+                    "original_prompt": prompt
+                })
+        except Exception as e:
+            error_msg = f"Error in prompt enhancement: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "original_prompt": prompt
+            })
+
+    async def _image_to_text(self, args: Dict[str, Any]):
+        """
+        Execute image-to-text conversion tool function.
+        
+        Args:
+            args: Arguments containing the image URL
+            
+        Returns:
+            str: JSON string with image caption information
+        """
+        image_url = args.get("image_url", "")
+        
+        if not image_url:
+            return json.dumps({"error": "No image URL provided"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the image captioning
+            result = await self.image_generator.image_to_text(image_url)
+            
+            if result["success"]:
+                caption = result.get("caption", "")
+                formatted_response = {
+                    "message": "Successfully generated caption for image",
+                    "image_url": image_url,
+                    "caption": caption
+                }
+                
+                # If we have a message context and a caption, send it directly in Discord
+                if discord_message and caption:
+                    try:
+                        await discord_message.channel.send(f"🖼️ **Image Caption:** {caption}")
+                        
+                        # Append the caption and image URL as plain text to the most recent assistant message
+                        if user_id is not None:
+                            history = await self.db.get_history(user_id)
+                            if history and len(history) > 0:
+                                # Find the most recent assistant message
+                                for i in range(len(history) - 1, -1, -1):
+                                    if history[i].get("role") == "assistant":
+                                        caption_text = f"\n\nImage Caption for {image_url}:\n{caption}"
+                                        
+                                        # If content is already a list
+                                        if isinstance(history[i]["content"], list):
+                                            # Find the text item and append to it
+                                            for item in history[i]["content"]:
+                                                if item.get("type") == "text":
+                                                    item["text"] += caption_text
+                                                    break
+                                            else:
+                                                # If no text item found, add a new one
+                                                history[i]["content"].append({
+                                                    "type": "text",
+                                                    "text": caption_text
+                                                })
+                                        else:
+                                            # Append to string content
+                                            history[i]["content"] += caption_text
+                                        
+                                        # Save updated history
+                                        await self.db.save_history(user_id, history)
+                                        break
+                        
+                    except Exception as e:
+                        logging.error(f"Error sending image caption: {str(e)}")
+                
+                return json.dumps(formatted_response)
+            else:
+                return json.dumps({
+                    "error": result.get("error", "Unknown error during image-to-text conversion"),
+                    "image_url": image_url
+                })
+        except Exception as e:
+            error_msg = f"Error in image-to-text conversion: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "image_url": image_url
+            })
+    
+    async def _upscale_image(self, args: Dict[str, Any]):
+        """
+        Execute image upscaling tool function.
+        
+        Args:
+            args: Arguments containing the image URL and scale factor
+            
+        Returns:
+            str: JSON string with upscaled image information
+        """
+        image_url = args.get("image_url", "")
+        scale_factor = min(int(args.get("scale_factor", 4)), 4)
+        
+        if not image_url:
+            return json.dumps({"error": "No image URL provided"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the image upscaling
+            result = await self.image_generator.upscale_image(image_url, scale_factor)
+            
+            if result["success"]:
+                # If we have a message context and binary images, send them to Discord
+                discord_image_urls = []
+                if discord_message and result.get("binary_images"):
+                    for i, img_data in enumerate(result["binary_images"]):
+                        try:
+                            # Send the upscaled image directly to Discord
+                            sent_message = await discord_message.channel.send(
+                                f"🖼️ Upscaled image (x{scale_factor}):",
+                                file=discord.File(io.BytesIO(img_data), filename=f"upscaled_image_{i+1}.png")
+                            )
+                            
+                            # Store the URL if available
+                            if sent_message.attachments and len(sent_message.attachments) > 0:
+                                discord_image_urls.append(sent_message.attachments[0].url)
+                        except Exception as e:
+                            logging.error(f"Error sending upscaled image: {str(e)}")
+                
+                # Add the image URLs to the formatted response
+                formatted_response = {
+                    "message": f"Successfully upscaled image (x{scale_factor})",
+                    "original_url": image_url,
+                    "scale_factor": scale_factor,
+                    "image_urls": result["image_urls"],
+                    "discord_image_urls": discord_image_urls
+                }
+                
+                # Create explicit text links for the images
+                image_links_text = ""
+                if discord_image_urls:
+                    image_links_text = "\n\nUpscaled images:"
+                    for j, url in enumerate(discord_image_urls):
+                        image_links_text += f"\n• Image {j+1}: {url}"
+                    
+                    # Append image URLs as plain text to the most recent assistant message
+                    if user_id is not None:
+                        history = await self.db.get_history(user_id)
+                        if history and len(history) > 0:
+                            # Find the most recent assistant message
+                            for i in range(len(history) - 1, -1, -1):
+                                if history[i].get("role") == "assistant":
+                                    # If content is already a list
+                                    if isinstance(history[i]["content"], list):
+                                        # Find the text item and append to it
+                                        for item in history[i]["content"]:
+                                            if item.get("type") == "text":
+                                                item["text"] += image_links_text
+                                                break
+                                        else:
+                                            # If no text item found, add a new one
+                                            history[i]["content"].append({
+                                                "type": "text",
+                                                "text": image_links_text
+                                            })
+                                    else:
+                                        # Append to string content
+                                        history[i]["content"] += image_links_text
+                                    
+                                    # Save updated history
+                                    await self.db.save_history(user_id, history)
+                                    break
+                
+                # Add image links to response
+                formatted_response["image_links_text"] = image_links_text
+                
+                return json.dumps(formatted_response)
+            else:
+                return json.dumps({
+                    "error": result.get("error", "Unknown error during image upscaling"),
+                    "image_url": image_url,
+                    "scale_factor": scale_factor
+                })
+        except Exception as e:
+            error_msg = f"Error in image upscaling: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "image_url": image_url,
+                "scale_factor": scale_factor
+            })
+    
+    async def _photo_maker(self, args: Dict[str, Any]):
+        """
+        Execute photo maker tool function.
+        
+        Args:
+            args: Arguments containing prompt, input_images, and other parameters
+            
+        Returns:
+            str: JSON string with generated image information
+        """
+        prompt = args.get("prompt", "")
+        input_images = args.get("input_images", [])
+        style = args.get("style", "No style")
+        strength = min(max(int(args.get("strength", 40)), 1), 100)  # Clamp between 1-100
+        num_images = min(int(args.get("num_images", 1)), 4)
+        
+        if not prompt:
+            return json.dumps({"error": "No prompt provided for photo maker"})
+            
+        if not input_images or not isinstance(input_images, list) or len(input_images) == 0:
+            return json.dumps({"error": "No input images provided for photo maker"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the photo maker request
+            result = await self.image_generator.photo_maker(
+                prompt=prompt,
+                input_images=input_images,
+                style=style,
+                strength=strength,
+                num_images=num_images
+            )
+            
+            if result["success"]:
+                # If we have a message context and binary images, send them to Discord
+                discord_image_urls = []
+                if discord_message and result.get("binary_images"):
+                    for i, img_data in enumerate(result["binary_images"]):
+                        try:
+                            # Send the generated image directly to Discord
+                            sent_message = await discord_message.channel.send(
+                                f"🖼️ Photo Maker result ({i+1}/{len(result['binary_images'])}):",
+                                file=discord.File(io.BytesIO(img_data), filename=f"photo_maker_{i+1}.png")
+                            )
+                            
+                            # Store the URL if available
+                            if sent_message.attachments and len(sent_message.attachments) > 0:
+                                discord_image_urls.append(sent_message.attachments[0].url)
+                        except Exception as e:
+                            logging.error(f"Error sending photo maker image: {str(e)}")
+                
+                # Add the image URLs to the formatted response
+                formatted_response = {
+                    "message": f"Successfully generated {result['image_count']} images with Photo Maker",
+                    "prompt": prompt,
+                    "style": style,
+                    "strength": strength,
+                    "image_urls": result["image_urls"],
+                    "discord_image_urls": discord_image_urls
+                }
+                
+                # Create explicit text links for the images
+                image_links_text = ""
+                if discord_image_urls:
+                    image_links_text = "\n\nPhoto Maker results:"
+                    for j, url in enumerate(discord_image_urls):
+                        image_links_text += f"\n• Image {j+1}: {url}"
+                    
+                    # Append image URLs as plain text to the most recent assistant message
+                    if user_id is not None:
+                        history = await self.db.get_history(user_id)
+                        if history and len(history) > 0:
+                            # Find the most recent assistant message
+                            for i in range(len(history) - 1, -1, -1):
+                                if history[i].get("role") == "assistant":
+                                    # If content is already a list
+                                    if isinstance(history[i]["content"], list):
+                                        # Find the text item and append to it
+                                        for item in history[i]["content"]:
+                                            if item.get("type") == "text":
+                                                item["text"] += image_links_text
+                                                break
+                                        else:
+                                            # If no text item found, add a new one
+                                            history[i]["content"].append({
+                                                "type": "text",
+                                                "text": image_links_text
+                                            })
+                                    else:
+                                        # Append to string content
+                                        history[i]["content"] += image_links_text
+                                    
+                                    # Save updated history
+                                    await self.db.save_history(user_id, history)
+                                    break
+                
+                # Add image links to response
+                formatted_response["image_links_text"] = image_links_text
+                
+                return json.dumps(formatted_response)
+            else:
+                return json.dumps({
+                    "error": result.get("error", "Unknown error during photo maker generation"),
+                    "prompt": prompt
+                })
+        except Exception as e:
+            error_msg = f"Error in photo maker: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "prompt": prompt
+            })
+    
+    async def _generate_image_with_refiner(self, args: Dict[str, Any]):
+        """
+        Execute refined image generation tool function.
+        
+        Args:
+            args: Arguments containing prompt and other parameters
+            
+        Returns:
+            str: JSON string with generated image information
+        """
+        prompt = args.get("prompt", "")
+        num_images = min(int(args.get("num_images", 1)), 4)
+        negative_prompt = args.get("negative_prompt", "blurry, distorted, low quality, disfigured")
+        
+        if not prompt:
+            return json.dumps({"error": "No prompt provided for image generation"})
+        
+        try:
+            # Find the current message context for displaying results
+            current_task = asyncio.current_task()
+            discord_message = None
+            user_id = None
+            
+            for uid, tasks in user_tasks.items():
+                if current_task in tasks:
+                    user_id = uid
+                    # Look for message context in task info
+                    for task_info in tasks:
+                        if isinstance(task_info, dict) and 'message' in task_info:
+                            discord_message = task_info['message']
+                            break
+                    break
+            
+            # Process the refined imagegeneration
+            result = await self.image_generator.generate_image_with_refiner(
+                prompt=prompt,
+                num_images=num_images,
+                negative_prompt=negative_prompt
+            )
+            
+            if result["success"]:
+                # If we have a message context and binary images, send them to Discord
+                discord_image_urls = []
+                if discord_message and result.get("binary_images"):
+                    for i, img_data in enumerate(result["binary_images"]):
+                        try:
+                            # Send the generated image directly to Discord
+                            sent_message = await discord_message.channel.send(
+                                f"🖼️ High-quality image generation result ({i+1}/{len(result['binary_images'])}):",
+                                file=discord.File(io.BytesIO(img_data), filename=f"refined_image_{i+1}.png")
+                            )
+                            
+                            # Store the URL if available
+                            if sent_message.attachments and len(sent_message.attachments) > 0:
+                                discord_image_urls.append(sent_message.attachments[0].url)
+                        except Exception as e:
+                            logging.error(f"Error sending refined image: {str(e)}")
+                
+                # Format the response
+                # Include image URLs in the final message text for history
+                image_links = []
+                for i, url in enumerate(discord_image_urls):
+                    image_links.append(f"Image {i+1}: {url}")
+                
+                formatted_response = {
+                    "message": f"Successfully generated {result['image_count']} high-quality images",
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "image_urls": result["image_urls"],
+                    "discord_image_urls":discord_image_urls,
+                    "image_links": "\n".join(image_links) if image_links else ""
+                }
+                
+                return json.dumps(formatted_response)
+            else:
+                return json.dumps({
+                    "error": result.get("error", "Unknown error during refined image generation"),
+                    "prompt": prompt
+                })
+        except Exception as e:
+            error_msg = f"Error in refined image generation: {str(e)}"
+            logging.error(error_msg)
+            return json.dumps({
+                "error": error_msg,
+                "prompt": prompt
+            })
 
 

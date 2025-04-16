@@ -67,7 +67,8 @@ MODEL_OPTIONS = [
     "o1-preview",
     "o1-mini",
     "o1",
-    "o3-mini"
+    "o3-mini",
+    "openai/gpt-4.1"
 ]
 
 PDF_ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini"]

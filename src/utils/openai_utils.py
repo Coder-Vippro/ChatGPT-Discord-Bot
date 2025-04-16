@@ -54,6 +54,170 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "edit_image",
+                "description": "Edit an image with operations like background removal. Use this when a user wants to edit an existing image, such as removing the background.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "image_url": {
+                            "type": "string",
+                            "description": "URL of the image to edit. This should be an image URL from the conversation."
+                        },
+                        "operation": {
+                            "type": "string", 
+                            "description": "Type of edit operation to perform",
+                            "enum": ["remove_background"],
+                            "default": "remove_background"
+                        }
+                    },
+                    "required": ["image_url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "enhance_prompt",
+                "description": "Enhance a text prompt with AI to create more detailed or creative versions. Use this when a user wants help creating better image prompts.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The original text prompt to enhance"
+                        },
+                        "num_versions": {
+                            "type": "integer",
+                            "description": "Number of enhanced versions to generate (1-5)",
+                            "default": 3,
+                            "minimum": 1,
+                            "maximum": 5
+                        },
+                        "max_length": {
+                            "type": "integer",
+                            "description": "Maximum length of each enhanced prompt",
+                            "default": 100
+                        }
+                    },
+                    "required": ["prompt"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "image_to_text",
+                "description": "Convert an image to a text description/caption. Use this when a user wants to understand what's in an image or get a caption for it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "image_url": {
+                            "type": "string",
+                            "description": "URL of the image to analyze. This should be an image URL from the conversation."
+                        }
+                    },
+                    "required": ["image_url"]
+                }
+            }
+        },
+        {
+            "type": "function", 
+            "function": {
+                "name": "upscale_image",
+                "description": "Upscale an image to a higher resolution. Use this when a user wants to improve the quality or size of an image.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "image_url": {
+                            "type": "string",
+                            "description": "URL of the image to upscale. This should be an image URL from the conversation."
+                        },
+                        "scale_factor": {
+                            "type": "integer",
+                            "description": "Factor by which to upscale the image (2, 3, or 4)",
+                            "default": 4,
+                            "enum": [2, 3, 4]
+                        }
+                    },
+                    "required": ["image_url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "photo_maker",
+                "description": "Generate images based on reference photos and a text prompt. Use this when a user wants to create images that maintain the style or characteristics of reference images.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "Text prompt describing what to generate"
+                        },
+                        "input_images": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "List of reference image URLs to use as input (1-4 images)"
+                        },
+                        "style": {
+                            "type": "string",
+                            "description": "Style to apply to the generated image",
+                            "default": "No style"
+                        },
+                        "strength": {
+                            "type": "integer",
+                            "description": "Strength of the input images' influence (1-100)",
+                            "default": 40,
+                            "minimum": 1,
+                            "maximum": 100
+                        },
+                        "num_images": {
+                            "type": "integer",
+                            "description": "Number of images to generate (1-4)",
+                            "default": 1,
+                            "minimum": 1,
+                            "maximum": 4
+                        }
+                    },
+                    "required": ["prompt", "input_images"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_image_with_refiner",
+                "description": "Generate high-quality images using a refiner model for better details. Use this when a user wants premium quality image generation.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {
+                            "type": "string",
+                            "description": "The prompt describing the image to generate"
+                        },
+                        "num_images": {
+                            "type": "integer",
+                            "description": "The number of images to generate (1-4)",
+                            "default": 1,
+                            "minimum": 1,
+                            "maximum": 4
+                        },
+                        "negative_prompt": {
+                            "type": "string",
+                            "description": "Things to avoid in the generated image",
+                            "default": "blurry, distorted, low quality, disfigured"
+                        }
+                    },
+                    "required": ["prompt"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "google_search",
                 "description": "Search the web for current information. Use this when you need to answer questions about current events or recent information.",
                 "parameters": {
@@ -322,20 +486,38 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
         # Create a copy of the message to avoid modifying the original
         processed_msg = dict(msg)
         
-        # Handle image URLs and file paths in content
+        # Handle image URLs differently based on message role
         if isinstance(processed_msg.get('content'), list):
-            new_content = []
-            for item in processed_msg['content']:
-                if item.get('type') == 'image_url':
-                    # Remove timestamp and ensure we're using the actual file path
-                    new_item = {
-                        'type': 'image_url',
-                        'image_url': item.get('image_url', '')
-                    }
-                    new_content.append(new_item)
-                else:
-                    new_content.append(item)
-            processed_msg['content'] = new_content
+            # For assistant messages, convert image URLs to text descriptions
+            if processed_msg.get('role') == 'assistant':
+                text_parts = []
+                
+                # Extract text and reference images in a text format instead
+                for item in processed_msg['content']:
+                    if item.get('type') == 'text':
+                        text_parts.append(item.get('text', ''))
+                    elif item.get('type') == 'image_url':
+                        # Add a text reference to the image instead of the actual image URL
+                        image_desc = "[Image previously shared]"
+                        text_parts.append(image_desc)
+                
+                # Join all text parts into a single string
+                processed_msg['content'] = ' '.join(text_parts)
+                
+            # For user messages, keep the image URLs as they are allowed
+            elif processed_msg.get('role') == 'user':
+                new_content = []
+                for item in processed_msg['content']:
+                    if item.get('type') == 'image_url':
+                        # Remove timestamp and ensure we're using the actual file path
+                        new_item = {
+                            'type': 'image_url',
+                            'image_url': item.get('image_url', '')
+                        }
+                        new_content.append(new_item)
+                    else:
+                        new_content.append(item)
+                processed_msg['content'] = new_content
         
         prepared_messages.append(processed_msg)
         
