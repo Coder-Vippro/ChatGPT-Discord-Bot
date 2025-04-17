@@ -70,10 +70,11 @@ MODEL_OPTIONS = [
     "openai/o3-mini",
     "openai/gpt-4.1",
     "openai/gpt-4.1-nano",
-    "openai/gpt-4.1-mini"
+    "openai/gpt-4.1-mini",
+    "openai/o3"
 ]
 
-PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini"]
+PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1","openai/gpt-4.1-nano","openai/gpt-4.1-mini"]
 PDF_BATCH_SIZE = 3
 
 # Prompt templates
