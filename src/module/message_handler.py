@@ -18,6 +18,7 @@ from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api,
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
+from src.config.config import PDF_ALLOWED_MODELS
 
 # Global task and rate limiting tracking
 user_tasks = {}
@@ -518,8 +519,9 @@ class MessageHandler:
                     for attachment in message.attachments:
                         if attachment.filename.lower().endswith('.pdf'):
                             # Check if user is allowed to process PDFs
-                            if model not in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
-                                await message.channel.send("PDF processing is only available with openai/gpt-4o and openai/gpt-4o-mini models. Please use /choose_model to select a supported model.")
+                            if model not in PDF_ALLOWED_MODELS:
+                                allowed_models = ", ".join(PDF_ALLOWED_MODELS)
+                                await message.channel.send(f"PDF processing is only available with these models: {allowed_models}. Please use /choose_model to select a supported model.")
                                 return
                                 
                             if not await self.db.is_admin(user_id) and not await self.db.is_user_whitelisted(user_id):
