@@ -829,7 +829,7 @@ class MessageHandler:
                     })
             
             # Store the response in history for models that support it
-            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o1-mini", "openai/o3-mini"]:
+            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o1-mini", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano", "openai/gpt-4.1-mini", "openai/o3", "openai/o4-mini", "openai/o1-preview"]:
                 if model in ["openai/o1-mini", "openai/o1-preview"]:
                     # For models without system prompt support, keep track separately
                     if has_images:
