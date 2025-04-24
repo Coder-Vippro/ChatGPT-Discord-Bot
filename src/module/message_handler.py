@@ -678,8 +678,8 @@ class MessageHandler:
                 messages_for_api = prepare_messages_for_api(history)
             
             # Determine which models should have tools available
-            # openai/openai/o1-mini and openai/openai/o1-preview do not support tools
-            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o3-mini"]
+            # openai/o1-mini and openai/o1-preview do not support tools
+            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
             
             # Prepare API call parameters
             api_params = {
