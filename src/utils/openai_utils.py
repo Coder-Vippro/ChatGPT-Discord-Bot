@@ -25,26 +25,75 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
     """
     Returns the list of tools available to the model.
     
+    IMPORTANT: CODE EXECUTION HAS BEEN SEPARATED INTO TWO SPECIALIZED TOOLS:
+    
+    1. execute_python_code: For general programming, calculations, algorithms, custom code
+       - Use when: math problems, programming tasks, custom scripts, algorithm implementations
+       - Can create visualizations from scratch
+       - Has sandboxed environment with package installation
+       - Automatically gets context about uploaded files when available
+    
+    2. analyze_data_file: For structured data analysis from CSV/Excel files  
+       - Use when: user explicitly requests data analysis, statistics, or insights from data files
+       - Has pre-built analysis templates (summary, correlation, distribution, comprehensive)
+       - Automatically handles data loading and creates appropriate visualizations
+       - Specialized for data science workflows
+       - Best for quick data exploration and standard analysis
+    
+    AI MODEL GUIDANCE FOR DATA FILE UPLOADS:
+    - When user uploads a data file (.csv, .xlsx, .xls) to Discord:
+      * File is automatically downloaded and saved
+      * User intent is detected (data analysis vs. general programming)
+      * If intent is "data analysis" → analyze_data_file is automatically called
+      * If intent is "general programming" → file context is added to conversation
+    
+    - When to use analyze_data_file:
+      * User uploads data file and asks for analysis, insights, statistics
+      * User wants standard data exploration (correlations, distributions, summaries)
+      * User requests "analyze this data" type queries
+    
+    - When to use execute_python_code:
+      * User asks for calculations, math problems, algorithms
+      * User wants custom code or programming solutions
+      * User uploads data file but wants custom processing (not standard analysis)
+      * User needs specific data transformations or custom visualizations
+      * File paths will be automatically provided in the execution environment
+    
+    DISCORD FILE INTEGRATION:
+    - Data files uploaded to Discord are automatically downloaded and saved
+    - File paths are automatically provided to the appropriate tools
+    - Context about uploaded files is added to Python execution environment
+    - Visualizations are automatically uploaded to Discord and displayed    
     Returns:
-        List of tool objects
+        List of tool objects for the OpenAI API
     """
     return [
         {
             "type": "function",
             "function": {
                 "name": "analyze_data_file",
-                "description": "Analyze a data file (CSV or Excel) and generate visualizations. Use this tool when a user uploads a data file and wants insights or visualizations. The visualizations will be automatically displayed in Discord. When describing the results, refer to visualizations by their chart_id and explain what they show. Always inform the user they can see the visualizations directly in the Discord chat.",
+                "description": "**DATA ANALYSIS TOOL** - Use this tool for structured data analysis from CSV/Excel files. This tool specializes in analyzing data with pre-built templates (summary, correlation, distribution, comprehensive) and generates appropriate visualizations automatically. Use this tool when: (1) User explicitly requests data analysis or insights, (2) User asks for statistics, correlations, or data exploration, (3) User wants standard data science analysis. The tool handles file loading, data validation, and creates visualizations that are automatically displayed in Discord.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Path to the data file to analyze"
+                            "description": "Path to the data file to analyze (CSV or Excel format required)"
                         },
                         "analysis_type": {
                             "type": "string",
-                            "description": "Type of analysis to perform (e.g., 'summary', 'correlation', 'distribution')",
-                            "enum": ["summary", "correlation", "distribution", "comprehensive"]
+                            "description": "Type of pre-built analysis template to use",
+                            "enum": ["summary", "correlation", "distribution", "comprehensive"],
+                            "default": "comprehensive"
+                        },
+                        "custom_analysis": {
+                            "type": "string",
+                            "description": "Optional custom analysis request in natural language. If provided, this overrides the analysis_type and generates custom Python code for the specific analysis requested."
+                        },
+                        "install_packages": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of Python packages to install before analysis"
                         }
                     },
                     "required": ["file_path"]
@@ -279,41 +328,39 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                     "required": ["prompt"]
                 }
             }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "code_interpreter",
-                "description": "Execute Python code to solve problems, perform calculations, or create data visualizations. Use this for data analysis, generating charts, and processing data. When analyzing data, ALWAYS include code for visualizations (using matplotlib, seaborn, or plotly) if the user requests charts or graphs. When visualizations are created, tell the user they can view the charts directly in Discord, and reference visualizations by their chart_id in your descriptions.",
+        },        {
+            "type": "function",            "function": {
+                "name": "execute_python_code",
+                "description": "**GENERAL PYTHON EXECUTION TOOL** - Use this tool for general programming tasks, mathematical calculations, algorithm implementations, and custom Python scripts. Use this tool when: (1) User asks for calculations or math problems, (2) User wants to run custom Python code, (3) User needs algorithm implementations, (4) User requests programming solutions, (5) Creating custom visualizations or data processing, (6) User uploads data files but wants custom code rather than standard analysis. File paths for uploaded data files are automatically made available in the execution environment.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "code": {
                             "type": "string",
-                            "description": "The Python code to execute. For data analysis, include necessary imports (pandas, matplotlib, etc.) and visualization code."
+                            "description": "The Python code to execute. Include all necessary imports and ensure code is complete and runnable."
                         },
-                        "language": {
+                        "input_data": {
                             "type": "string",
-                            "description": "Programming language (only Python supported)",
-                            "enum": ["python", "py"]
+                            "description": "Optional input data to be made available to the code as a variable named 'input_data'"
                         },
-                        "input": {
-                            "type": "string",
-                            "description": "Optional input data for the code"
+                        "install_packages": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional list of Python packages to install before execution (e.g., ['numpy', 'matplotlib'])"
                         },
-                        "file_path": {
-                            "type": "string",
-                            "description": "Optional path to a data file to analyze (supports CSV and Excel files)"
-                        },
-                        "analysis_request": {
-                            "type": "string",
-                            "description": "Natural language description of the analysis to perform. If this includes visualization requests, the generated code must include plotting code using matplotlib, seaborn, or plotly."
-                        },
-                        "include_visualization": {
+                        "enable_visualization": {
                             "type": "boolean",
-                            "description": "Whether to include visualizations using matplotlib/seaborn"
+                            "description": "Set to true when creating charts, graphs, or any visual output with matplotlib/seaborn"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Maximum execution time in seconds (default: 30, max: 120)",
+                            "default": 30,
+                            "minimum": 1,
+                            "maximum": 120
                         }
-                    }
+                    },
+                    "required": ["code"]
                 }
             }
         },

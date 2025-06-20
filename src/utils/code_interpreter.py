@@ -4,17 +4,18 @@ import io
 import re
 import logging
 import asyncio
+import subprocess
+import tempfile
+import time
+import uuid
 from logging.handlers import RotatingFileHandler
 import traceback
 import contextlib
 from typing import Dict, Any, Optional, List
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from .code_utils import sanitize_code, get_temporary_file_path, generate_analysis_code, analyze_data, DATA_FILES_DIR, format_output_path, clean_old_files
+
+# Import the new separated modules
+from .python_executor import execute_python_code
+from .data_analyzer import analyze_data_file
 
 # Configure logging
 log_file = 'logs/code_interpreter.log'
@@ -26,10 +27,42 @@ logger = logging.getLogger('code_interpreter')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
 
-# Regular expression to find image file paths in output
-IMAGE_PATH_PATTERN = r'(sandbox:)?(\/media\/quocanh\/.*\.(png|jpg|jpeg|gif))'
-
 async def execute_code(args: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Main entry point for code execution - routes to appropriate handler.
+    
+    This function maintains backward compatibility while routing requests
+    to the appropriate specialized handler.
+    
+    Args:
+        args: Dictionary containing execution parameters
+        
+    Returns:
+        Dict containing execution results
+    """
+    try:
+        # Check if this is a data analysis request
+        file_path = args.get("file_path", "")
+        analysis_request = args.get("analysis_request", "")
+        
+        if file_path and (analysis_request or args.get("analysis_type")):
+            # Route to data analyzer
+            logger.info("Routing to data analyzer")
+            return await analyze_data_file(args)
+        else:
+            # Route to Python executor
+            logger.info("Routing to Python executor")
+            return await execute_python_code(args)
+            
+    except Exception as e:
+        error_msg = f"Error in code execution router: {str(e)}"
+        logger.error(f"{error_msg}\n{traceback.format_exc()}")
+        return {
+            "success": False,
+            "error": error_msg,
+            "output": "",
+            "traceback": traceback.format_exc()
+        }
     """
     Execute code with support for data analysis and visualization.
     
