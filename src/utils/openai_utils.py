@@ -31,7 +31,6 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
        - Use when: math problems, programming tasks, custom scripts, algorithm implementations
        - Can create visualizations from scratch
        - Has sandboxed environment with package installation
-       - Automatically gets context about uploaded files when available
     
     2. analyze_data_file: For structured data analysis from CSV/Excel files  
        - Use when: user explicitly requests data analysis, statistics, or insights from data files
@@ -329,9 +328,10 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                 }
             }
         },        {
-            "type": "function",            "function": {
+            "type": "function",            
+            "function": {
                 "name": "execute_python_code",
-                "description": "**GENERAL PYTHON EXECUTION TOOL** - Use this tool for general programming tasks, mathematical calculations, algorithm implementations, and custom Python scripts. Use this tool when: (1) User asks for calculations or math problems, (2) User wants to run custom Python code, (3) User needs algorithm implementations, (4) User requests programming solutions, (5) Creating custom visualizations or data processing, (6) User uploads data files but wants custom code rather than standard analysis. File paths for uploaded data files are automatically made available in the execution environment.",
+                "description": "**GENERAL PYTHON EXECUTION TOOL** - Use this tool for general programming tasks, mathematical calculations, algorithm implementations, and custom Python scripts. CRITICAL: You MUST write complete Python code with explicit print() statements to display any results. For calculations, write: print(your_calculation). Never write bare expressions without print(). Use this tool when: (1) User asks for calculations or math problems - ALWAYS wrap in print(), (2) User wants to run custom Python code, (3) User needs algorithm implementations, (4) User requests programming solutions, (5) Creating custom visualizations or data processing, (6) User uploads data files but wants custom code rather than standard analysis.",
                 "parameters": {
                     "type": "object",
                     "properties": {

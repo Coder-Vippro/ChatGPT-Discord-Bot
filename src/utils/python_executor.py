@@ -327,7 +327,7 @@ async def execute_code_safely(code: str, input_data: str, timeout: int) -> Dict[
         
         # Execute the code with timeout
         try:
-            # Use asyncio.wait_for for timeout
+            # Execute the code as statements
             await asyncio.wait_for(
                 asyncio.to_thread(exec, code, exec_globals),
                 timeout=timeout
