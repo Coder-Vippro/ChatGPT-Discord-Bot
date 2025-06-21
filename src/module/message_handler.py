@@ -13,12 +13,13 @@ import sys
 import subprocess
 import base64
 import traceback
+import tiktoken
 from datetime import datetime, timedelta
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
-from src.config.config import PDF_ALLOWED_MODELS
+from src.config.config import PDF_ALLOWED_MODELS, MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT
 
 # Global task and rate limiting tracking
 user_tasks = {}
@@ -118,6 +119,9 @@ class MessageHandler:
         # Install required packages if not available
         if not PANDAS_AVAILABLE:
             self._install_data_packages()
+        
+        # Initialize tiktoken encoder for token counting (using o200k_base for all models)
+        self.token_encoder = tiktoken.get_encoding("o200k_base")
     
     def _find_user_id_from_current_task(self):
         """
@@ -875,8 +879,62 @@ class MessageHandler:
             chart_id = None
             image_urls = []  # Will store unique image URLs
             
-            # Make the initial API call with retry logic
-            response = await self._retry_api_call(lambda: self.client.chat.completions.create(**api_params))
+            # Make the initial API call without retry logic to avoid extra costs
+            try:
+                response = await self.client.chat.completions.create(**api_params)
+            except Exception as e:
+                # Handle 413 Request Entity Too Large error automatically
+                if "413" in str(e) or "tokens_limit_reached" in str(e) or "Request body too large" in str(e):
+                    logging.warning(f"Token limit exceeded for model {model}, automatically trimming history...")
+                    
+                    # Trim the history to fit the model's token limit
+                    current_tokens = self._count_tokens(messages_for_api)
+                    logging.info(f"Current message tokens: {current_tokens}")
+                    
+                    if model in ["openai/o1-mini", "openai/o1-preview"]:
+                        # For o1 models, use the trimmed history without system prompt
+                        trimmed_history_without_system = self._trim_history_to_token_limit(history_without_system, model)
+                        messages_for_api = prepare_messages_for_api(trimmed_history_without_system)
+                    else:
+                        # For regular models, trim the full history
+                        trimmed_history = self._trim_history_to_token_limit(history, model)
+                        messages_for_api = prepare_messages_for_api(trimmed_history)
+                    
+                    # Update API parameters with trimmed messages
+                    api_params["messages"] = messages_for_api
+                    
+                    # Save the trimmed history to prevent this issue in the future
+                    if model in ["openai/o1-mini", "openai/o1-preview"]:
+                        # For o1 models, save the trimmed history back to the database
+                        new_history = []
+                        if system_content:
+                            new_history.append({"role": "system", "content": system_content})
+                        new_history.extend(trimmed_history_without_system[1:])  # Skip the "Instructions" message
+                        await self.db.save_history(user_id, new_history)
+                    else:
+                        await self.db.save_history(user_id, trimmed_history)
+                    
+                    # Inform user about the automatic cleanup
+                    await message.channel.send("🔧 **Auto-optimized conversation history** - Removed older messages to fit model limits.")
+                    
+                    # Try the API call again with trimmed history
+                    try:
+                        response = await self.client.chat.completions.create(**api_params)
+                        logging.info(f"Successfully processed request after history trimming for model {model}")
+                    except Exception as retry_error:
+                        # If it still fails, provide a helpful error message
+                        await message.channel.send(
+                            f"❌ **Request still too large for {model}**\n"
+                            f"Even after optimizing history, the request is too large.\n"
+                            f"Try:\n"
+                            f"• Using a model with higher token limits\n"
+                            f"• Reducing the size of your current message\n"
+                            f"• Using `/clear_history` to start fresh"
+                        )
+                        return
+                else:
+                    # Re-raise other errors
+                    raise e
             
             # Process tool calls if any
             updated_messages = None
@@ -949,12 +1007,12 @@ class MessageHandler:
                 
                 # If tool calls were processed, make another API call with the updated messages
                 if tool_calls_processed and updated_messages:
-                    response = await self._retry_api_call(lambda: self.client.chat.completions.create(
+                    response = await self.client.chat.completions.create(
                         model=model,
                         messages=updated_messages,
                         temperature=0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else 1,
                         timeout=120
-                    ))
+                    )
             
             reply = response.choices[0].message.content
             
@@ -1174,8 +1232,7 @@ class MessageHandler:
     async def _enhance_prompt(self, args: Dict[str, Any]):
         """Enhance a prompt"""
         try:
-            from src.utils.openai_utils import enhance_prompt
-            result = await enhance_prompt(args)
+            result = await self.image_generator.enhance_prompt(args)
             return result
         except Exception as e:
             logging.error(f"Error in prompt enhancement: {str(e)}")
@@ -1184,8 +1241,7 @@ class MessageHandler:
     async def _image_to_text(self, args: Dict[str, Any]):
         """Convert image to text"""
         try:
-            from src.utils.image_utils import image_to_text
-            result = await image_to_text(args)
+            result = await self.image_generator.image_to_text(args)
             return result
         except Exception as e:
             logging.error(f"Error in image to text: {str(e)}")
@@ -1250,23 +1306,160 @@ class MessageHandler:
             except Exception as e:
                 logging.error(f"Error in file cleanup: {str(e)}")
     
-    async def _retry_api_call(self, call_func, max_retries=3, base_delay=1):
-        """Retry API calls with exponential backoff"""
-        retries = 0
-        last_error = None
+    def _count_tokens(self, messages: List[Dict[str, Any]]) -> int:
+        """
+        Count tokens in a list of messages using tiktoken o200k_base encoding.
         
-        while retries < max_retries:
-            try:
-                return await call_func()
-            except Exception as e:
-                last_error = e
-                retries += 1
-                if retries < max_retries:
-                    delay = base_delay * (2 ** (retries - 1))
-                    logging.warning(f"API call failed (attempt {retries}/{max_retries}), retrying in {delay}s: {str(e)}")
-                    await asyncio.sleep(delay)
+        Args:
+            messages: List of message dictionaries
+            
+        Returns:
+            int: Total token count
+        """
+        try:
+            total_tokens = 0
+            
+            for message in messages:
+                # Count tokens for role
+                if 'role' in message:
+                    total_tokens += len(self.token_encoder.encode(message['role']))
+                
+                # Count tokens for content
+                if 'content' in message:
+                    content = message['content']
+                    if isinstance(content, str):
+                        # Simple string content
+                        total_tokens += len(self.token_encoder.encode(content))
+                    elif isinstance(content, list):
+                        # Multi-modal content (text + images)
+                        for item in content:
+                            if isinstance(item, dict):
+                                if item.get('type') == 'text' and 'text' in item:
+                                    total_tokens += len(self.token_encoder.encode(item['text']))
+                                elif item.get('type') == 'image_url':
+                                    # Images use a fixed token cost (approximation)
+                                    total_tokens += 765  # Standard cost for high-detail images
+                
+                # Add overhead for message formatting
+                total_tokens += 4  # Overhead per message
+            
+            return total_tokens
+            
+        except Exception as e:
+            logging.error(f"Error counting tokens: {str(e)}")
+            # Return a conservative estimate if token counting fails
+            return len(str(messages)) // 3  # Rough approximation
+    
+    def _trim_history_to_token_limit(self, history: List[Dict[str, Any]], model: str, target_tokens: int = None) -> List[Dict[str, Any]]:
+        """
+        Trim conversation history to fit within model token limits.
+        
+        Args:
+            history: List of message dictionaries
+            model: Model name to get token limit
+            target_tokens: Optional custom target token count
+            
+        Returns:
+            List[Dict[str, Any]]: Trimmed history that fits within token limits
+        """
+        try:
+            # Get token limit for the model
+            if target_tokens:
+                token_limit = target_tokens
+            else:
+                token_limit = MODEL_TOKEN_LIMITS.get(model, DEFAULT_TOKEN_LIMIT)
+            
+            # Reserve 20% of tokens for the response and some buffer
+            available_tokens = int(token_limit * 0.8)
+            
+            # Always keep the system message if present
+            system_message = None
+            conversation_messages = []
+            
+            for msg in history:
+                if msg.get('role') == 'system':
+                    system_message = msg
                 else:
+                    conversation_messages.append(msg)
+            
+            # Start with system message
+            trimmed_history = []
+            current_tokens = 0
+            
+            if system_message:
+                system_tokens = self._count_tokens([system_message])
+                if system_tokens < available_tokens:
+                    trimmed_history.append(system_message)
+                    current_tokens += system_tokens
+                else:
+                    # If system message is too large, truncate it
+                    content = system_message.get('content', '')
+                    if isinstance(content, str):
+                        # Truncate system message to fit
+                        words = content.split()
+                        truncated_content = ''
+                        for word in words:
+                            test_content = truncated_content + ' ' + word if truncated_content else word
+                            test_tokens = len(self.token_encoder.encode(test_content))
+                            if test_tokens < available_tokens // 2:  # Use half available tokens for system
+                                truncated_content = test_content
+                            else:
+                                break
+                        
+                        truncated_system = {
+                            'role': 'system',
+                            'content': truncated_content + '...[truncated]'
+                        }
+                        trimmed_history.append(truncated_system)
+                        current_tokens += self._count_tokens([truncated_system])
+            
+            # Add conversation messages from most recent backwards
+            available_for_conversation = available_tokens - current_tokens
+            
+            # Process messages in reverse order (most recent first)
+            for msg in reversed(conversation_messages):
+                msg_tokens = self._count_tokens([msg])
+                
+                if current_tokens + msg_tokens <= available_tokens:
+                    trimmed_history.insert(-1 if system_message else 0, msg)  # Insert before system or at start
+                    current_tokens += msg_tokens
+                else:
+                    # Stop adding more messages
                     break
-        
-        logging.error(f"All API call retries failed: {str(last_error)}")
-        raise last_error
+            
+            # Ensure we have at least the last user message if possible
+            if len(conversation_messages) > 0 and len(trimmed_history) <= (1 if system_message else 0):
+                last_msg = conversation_messages[-1]
+                last_msg_tokens = self._count_tokens([last_msg])
+                
+                if last_msg_tokens < available_tokens:
+                    if system_message:
+                        trimmed_history.insert(-1, last_msg)
+                    else:
+                        trimmed_history.append(last_msg)
+            
+            logging.info(f"Trimmed history from {len(history)} to {len(trimmed_history)} messages "
+                        f"({self._count_tokens(history)} to {self._count_tokens(trimmed_history)} tokens) "
+                        f"for model {model}")
+            
+            return trimmed_history
+            
+        except Exception as e:
+            logging.error(f"Error trimming history: {str(e)}")
+            # Return a safe minimal history
+            if history:
+                # Keep system message + last user message if possible
+                minimal_history = []
+                for msg in history:
+                    if msg.get('role') == 'system':
+                        minimal_history.append(msg)
+                        break
+                
+                # Add the last user message
+                for msg in reversed(history):
+                    if msg.get('role') == 'user':
+                        minimal_history.append(msg)
+                        break
+                
+                return minimal_history
+            return history

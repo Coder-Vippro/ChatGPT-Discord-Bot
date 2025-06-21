@@ -210,6 +210,60 @@ def scrape_web_content_with_count(url: str, max_tokens: int = 4000, return_token
         message = f"Failed to process content from {url}: {str(e)}"
         return (message, 0) if return_token_count else message
 
+async def google_search(args: Dict[str, Any]) -> str:
+    """
+    Async wrapper for Google search to match the expected interface.
+    
+    Args:
+        args: Dictionary containing 'query' and optional 'num_results'
+        
+    Returns:
+        JSON string with search results
+    """
+    try:
+        query = args.get('query', '')
+        num_results = args.get('num_results', 3)
+        
+        if not query:
+            return json.dumps({"error": "No search query provided"})
+            
+        # Call the synchronous google_custom_search function
+        result = google_custom_search(query, num_results)
+        
+        return json.dumps(result, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({"error": f"Google search failed: {str(e)}"})
+
+async def scrape_webpage(args: Dict[str, Any]) -> str:
+    """
+    Async wrapper for webpage scraping to match the expected interface.
+    
+    Args:
+        args: Dictionary containing 'url' and optional 'max_tokens'
+        
+    Returns:
+        JSON string with scraped content
+    """
+    try:
+        url = args.get('url', '')
+        max_tokens = args.get('max_tokens', 4000)
+        
+        if not url:
+            return json.dumps({"error": "No URL provided"})
+            
+        # Call the synchronous scrape_web_content function
+        content = scrape_web_content(url, max_tokens)
+        
+        return json.dumps({
+            "url": url,
+            "content": content,
+            "success": True
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({"error": f"Web scraping failed: {str(e)}"})
+
 # Keep the original scrape_web_content function for backward compatibility
 def scrape_web_content(url: str, max_tokens: int = 4000) -> str:
     """

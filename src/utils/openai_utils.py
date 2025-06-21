@@ -22,78 +22,23 @@ if PROJECT_ROOT not in sys.path:
 
 
 def get_tools_for_model() -> List[Dict[str, Any]]:
-    """
-    Returns the list of tools available to the model.
-    
-    IMPORTANT: CODE EXECUTION HAS BEEN SEPARATED INTO TWO SPECIALIZED TOOLS:
-    
-    1. execute_python_code: For general programming, calculations, algorithms, custom code
-       - Use when: math problems, programming tasks, custom scripts, algorithm implementations
-       - Can create visualizations from scratch
-       - Has sandboxed environment with package installation
-    
-    2. analyze_data_file: For structured data analysis from CSV/Excel files  
-       - Use when: user explicitly requests data analysis, statistics, or insights from data files
-       - Has pre-built analysis templates (summary, correlation, distribution, comprehensive)
-       - Automatically handles data loading and creates appropriate visualizations
-       - Specialized for data science workflows
-       - Best for quick data exploration and standard analysis
-    
-    AI MODEL GUIDANCE FOR DATA FILE UPLOADS:
-    - When user uploads a data file (.csv, .xlsx, .xls) to Discord:
-      * File is automatically downloaded and saved
-      * User intent is detected (data analysis vs. general programming)
-      * If intent is "data analysis" → analyze_data_file is automatically called
-      * If intent is "general programming" → file context is added to conversation
-    
-    - When to use analyze_data_file:
-      * User uploads data file and asks for analysis, insights, statistics
-      * User wants standard data exploration (correlations, distributions, summaries)
-      * User requests "analyze this data" type queries
-    
-    - When to use execute_python_code:
-      * User asks for calculations, math problems, algorithms
-      * User wants custom code or programming solutions
-      * User uploads data file but wants custom processing (not standard analysis)
-      * User needs specific data transformations or custom visualizations
-      * File paths will be automatically provided in the execution environment
-    
-    DISCORD FILE INTEGRATION:
-    - Data files uploaded to Discord are automatically downloaded and saved
-    - File paths are automatically provided to the appropriate tools
-    - Context about uploaded files is added to Python execution environment
-    - Visualizations are automatically uploaded to Discord and displayed    
-    Returns:
-        List of tool objects for the OpenAI API
-    """
+    """Returns concise tool definitions optimized for token usage."""
     return [
         {
             "type": "function",
             "function": {
                 "name": "analyze_data_file",
-                "description": "**DATA ANALYSIS TOOL** - Use this tool for structured data analysis from CSV/Excel files. This tool specializes in analyzing data with pre-built templates (summary, correlation, distribution, comprehensive) and generates appropriate visualizations automatically. Use this tool when: (1) User explicitly requests data analysis or insights, (2) User asks for statistics, correlations, or data exploration, (3) User wants standard data science analysis. The tool handles file loading, data validation, and creates visualizations that are automatically displayed in Discord.",
+                "description": "Analyze CSV/Excel files with templates or custom analysis.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Path to the data file to analyze (CSV or Excel format required)"
-                        },
+                        "file_path": {"type": "string", "description": "Path to CSV/Excel file"},
                         "analysis_type": {
-                            "type": "string",
-                            "description": "Type of pre-built analysis template to use",
+                            "type": "string", 
                             "enum": ["summary", "correlation", "distribution", "comprehensive"],
                             "default": "comprehensive"
                         },
-                        "custom_analysis": {
-                            "type": "string",
-                            "description": "Optional custom analysis request in natural language. If provided, this overrides the analysis_type and generates custom Python code for the specific analysis requested."
-                        },
-                        "install_packages": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of Python packages to install before analysis"
-                        }
+                        "custom_analysis": {"type": "string", "description": "Custom analysis request"}
                     },
                     "required": ["file_path"]
                 }
@@ -103,20 +48,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "edit_image",
-                "description": "Edit an image with operations like background removal. Use this when a user wants to edit an existing image, such as removing the background.",
+                "description": "Edit images (remove background, etc). Returns image URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {
-                            "type": "string",
-                            "description": "URL of the image to edit. This should be an image URL from the conversation."
-                        },
-                        "operation": {
-                            "type": "string", 
-                            "description": "Type of edit operation to perform",
-                            "enum": ["remove_background"],
-                            "default": "remove_background"
-                        }
+                        "image_url": {"type": "string", "description": "Image URL to edit"},
+                        "operation": {"type": "string", "enum": ["remove_background"], "default": "remove_background"}
                     },
                     "required": ["image_url"]
                 }
@@ -126,26 +63,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "enhance_prompt",
-                "description": "Enhance a text prompt with AI to create more detailed or creative versions. Use this when a user wants help creating better image prompts.",
+                "description": "Create enhanced versions of text prompts.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "The original text prompt to enhance"
-                        },
-                        "num_versions": {
-                            "type": "integer",
-                            "description": "Number of enhanced versions to generate (1-5)",
-                            "default": 3,
-                            "minimum": 1,
-                            "maximum": 5
-                        },
-                        "max_length": {
-                            "type": "integer",
-                            "description": "Maximum length of each enhanced prompt",
-                            "default": 100
-                        }
+                        "prompt": {"type": "string", "description": "Original prompt"},
+                        "num_versions": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5}
                     },
                     "required": ["prompt"]
                 }
@@ -155,14 +78,11 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "image_to_text",
-                "description": "Convert an image to a text description/caption. Use this when a user wants to understand what's in an image or get a caption for it.",
+                "description": "Convert image to text description.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {
-                            "type": "string",
-                            "description": "URL of the image to analyze. This should be an image URL from the conversation."
-                        }
+                        "image_url": {"type": "string", "description": "Image URL to analyze"}
                     },
                     "required": ["image_url"]
                 }
@@ -172,20 +92,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function", 
             "function": {
                 "name": "upscale_image",
-                "description": "Upscale an image to a higher resolution. Use this when a user wants to improve the quality or size of an image.",
+                "description": "Upscale image resolution. Returns image URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {
-                            "type": "string",
-                            "description": "URL of the image to upscale. This should be an image URL from the conversation."
-                        },
-                        "scale_factor": {
-                            "type": "integer",
-                            "description": "Factor by which to upscale the image (2, 3, or 4)",
-                            "default": 4,
-                            "enum": [2, 3, 4]
-                        }
+                        "image_url": {"type": "string", "description": "Image URL to upscale"},
+                        "scale_factor": {"type": "integer", "enum": [2, 3, 4], "default": 4}
                     },
                     "required": ["image_url"]
                 }
@@ -195,40 +107,14 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "photo_maker",
-                "description": "Generate images based on reference photos and a text prompt. Use this when a user wants to create images that maintain the style or characteristics of reference images.",
+                "description": "Generate images based on reference photos. Returns image URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "Text prompt describing what to generate"
-                        },
-                        "input_images": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            },
-                            "description": "List of reference image URLs to use as input (1-4 images)"
-                        },
-                        "style": {
-                            "type": "string",
-                            "description": "Style to apply to the generated image",
-                            "default": "No style"
-                        },
-                        "strength": {
-                            "type": "integer",
-                            "description": "Strength of the input images' influence (1-100)",
-                            "default": 40,
-                            "minimum": 1,
-                            "maximum": 100
-                        },
-                        "num_images": {
-                            "type": "integer",
-                            "description": "Number of images to generate (1-4)",
-                            "default": 1,
-                            "minimum": 1,
-                            "maximum": 4
-                        }
+                        "prompt": {"type": "string", "description": "Generation prompt"},
+                        "input_images": {"type": "array", "items": {"type": "string"}, "description": "Reference image URLs"},
+                        "strength": {"type": "integer", "default": 40, "minimum": 1, "maximum": 100},
+                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4}
                     },
                     "required": ["prompt", "input_images"]
                 }
@@ -238,26 +124,13 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image_with_refiner",
-                "description": "Generate high-quality images using a refiner model for better details. Use this when a user wants premium quality image generation.",
+                "description": "Generate high-quality images. Returns image URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "The prompt describing the image to generate"
-                        },
-                        "num_images": {
-                            "type": "integer",
-                            "description": "The number of images to generate (1-4)",
-                            "default": 1,
-                            "minimum": 1,
-                            "maximum": 4
-                        },
-                        "negative_prompt": {
-                            "type": "string",
-                            "description": "Things to avoid in the generated image",
-                            "default": "blurry, distorted, low quality, disfigured"
-                        }
+                        "prompt": {"type": "string", "description": "Image prompt"},
+                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4},
+                        "negative_prompt": {"type": "string", "default": "blurry, low quality"}
                     },
                     "required": ["prompt"]
                 }
@@ -267,21 +140,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "google_search",
-                "description": "Search the web for current information. Use this when you need to answer questions about current events or recent information.",
+                "description": "Search web for current information.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query"
-                        },
-                        "num_results": {
-                            "type": "integer",
-                            "description": "The number of search results to return (1-10)",
-                            "default": 3,
-                            "minimum": 1,
-                            "maximum": 10
-                        }
+                        "query": {"type": "string", "description": "Search query"},
+                        "num_results": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10}
                     },
                     "required": ["query"]
                 }
@@ -291,14 +155,11 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "scrape_webpage",
-                "description": "Scrape and extract content from a webpage. Use this to get the content of a specific webpage.",
+                "description": "Extract content from webpage.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "url": {
-                            "type": "string",
-                            "description": "The URL of the webpage to scrape"
-                        }
+                        "url": {"type": "string", "description": "Webpage URL"}
                     },
                     "required": ["url"]
                 }
@@ -308,57 +169,30 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image",
-                "description": "Generate images based on text prompts. Use this when the user asks for an image to be created.",
+                "description": "Generate images from text prompts. Returns image URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": "The prompt describing the image to generate"
-                        },
-                        "num_images": {
-                            "type": "integer",
-                            "description": "The number of images to generate (1-4)",
-                            "default": 1,
-                            "minimum": 1,
-                            "maximum": 4
-                        }
+                        "prompt": {"type": "string", "description": "Image prompt"},
+                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4}
                     },
                     "required": ["prompt"]
                 }
             }
-        },        {
+        },
+        {
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": "**GENERAL PYTHON EXECUTION TOOL** - Use this tool for general programming tasks, mathematical calculations, algorithm implementations, and custom Python scripts. CRITICAL: You MUST write complete Python code with explicit print() statements to display any results. For calculations, write: print(your_calculation). Never write bare expressions without print(). Use this tool when: (1) User asks for calculations or math problems - ALWAYS wrap in print(), (2) User wants to run custom Python code, (3) User needs algorithm implementations, (4) User requests programming solutions, (5) Creating custom visualizations or data processing, (6) User uploads data files but wants custom code rather than standard analysis.",
+                "description": "Execute Python code. MUST use print() for output.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The Python code to execute. Include all necessary imports and ensure code is complete and runnable."
-                        },
-                        "input_data": {
-                            "type": "string",
-                            "description": "Optional input data to be made available to the code as a variable named 'input_data'"
-                        },
-                        "install_packages": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Optional list of Python packages to install before execution (e.g., ['numpy', 'matplotlib'])"
-                        },
-                        "enable_visualization": {
-                            "type": "boolean",
-                            "description": "Set to true when creating charts, graphs, or any visual output with matplotlib/seaborn"
-                        },
-                        "timeout": {
-                            "type": "integer",
-                            "description": "Maximum execution time in seconds (default: 30, max: 120)",
-                            "default": 30,
-                            "minimum": 1,
-                            "maximum": 120
-                        }
+                        "code": {"type": "string", "description": "Python code with print() statements"},
+                        "input_data": {"type": "string", "description": "Optional input data"},
+                        "install_packages": {"type": "array", "items": {"type": "string"}},
+                        "enable_visualization": {"type": "boolean", "description": "For charts/graphs"},
+                        "timeout": {"type": "integer", "default": 30, "minimum": 1, "maximum": 120}
                     },
                     "required": ["code"]
                 }
@@ -368,18 +202,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "set_reminder",
-                "description": "Set a reminder for the user. Use this when a user wants to be reminded about something at a specific time.",
+                "description": "Set user reminder. Supports relative time (30m, 2h, 1d), specific times (9:00, 15:30, 9:00 pm, 2:30 am), keywords (tomorrow, tonight, noon), and combinations (9:00 pm today, 2:00 pm tomorrow).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The content of the reminder"
-                        },
-                        "time": {
-                            "type": "string",
-                            "description": "The time for the reminder. Can be relative (e.g., '30m', '2h', '1d') or specific times ('tomorrow', '3:00pm', etc.)"
-                        }
+                        "content": {"type": "string", "description": "Reminder content"},
+                        "time": {"type": "string", "description": "Time in formats like: '30m', '2h', '1d', '9:00', '15:30', '9:00 pm', '2:30 am', '9:00 pm today', '2:00 pm tomorrow', 'tomorrow', 'tonight', 'noon'"}
                     },
                     "required": ["content", "time"]
                 }
@@ -389,29 +217,14 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function", 
             "function": {
                 "name": "get_reminders",
-                "description": "Get a list of upcoming reminders for the user. Use this when user asks about their reminders.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
+                "description": "Get user reminders list.",
+                "parameters": {"type": "object", "properties": {}, "required": []}
             }
         }
     ]
 
 async def process_tool_calls(client, response, messages, tool_functions) -> Tuple[bool, List[Dict[str, Any]]]:
-    """
-    Process and execute tool calls from the OpenAI API response.
-    
-    Args:
-        client: OpenAI client
-        response: API response containing tool calls
-        messages: The current chat messages
-        tool_functions: Dictionary mapping tool names to handler functions
-        
-    Returns:
-        Tuple containing (processed_any_tools, updated_messages)
-    """
+    """Process and execute tool calls from the OpenAI API response."""
     processed_any = False
     tool_calls = response.choices[0].message.tool_calls
     
@@ -497,22 +310,14 @@ def trim_content_to_token_limit(content: str, max_tokens: int = 8096) -> str:
             text = text[text.find('\n', 1000):]
         return text
         
-    return '\n.join(lines)'
+    return '\n'.join(lines)
 
 async def prepare_file_from_path(file_path: str) -> discord.File:
     """Convert a file path to a Discord File object."""
     return discord.File(file_path)
 
 def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Prepare message history for the OpenAI API.
-    
-    Args:
-        messages: List of message objects
-        
-    Returns:
-        Prepared messages for API
-    """
+    """Prepare message history for the OpenAI API with image URL handling."""
     prepared_messages = []
     
     # Check if there's a system message already
@@ -522,7 +327,7 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     if not has_system_message:
         prepared_messages.append({
             "role": "system",
-            "content": "You are a helpful AI assistant that can answer questions, provide information, and assist with various tasks. When handling data analysis, always describe the visualizations in detail and refer to them by their chart_id. For any data file uploaded by the user, use the analyze_data_file tool or code_interpreter tool to generate analysis and visualizations. When visualizations are created, they will be automatically displayed in the Discord chat. Always mention that the user can see the visualizations directly in Discord."
+            "content": "You are a helpful AI assistant. For image tools, you'll receive image URLs in responses - reference them instead of sending binary data."
         })
     
     for msg in messages:
@@ -545,7 +350,7 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
                         text_parts.append(item.get('text', ''))
                     elif item.get('type') == 'image_url':
                         # Add a text reference to the image instead of the actual image URL
-                        image_desc = "[Image previously shared]"
+                        image_desc = "[Image URL provided in response]"
                         text_parts.append(image_desc)
                 
                 # Join all text parts into a single string
@@ -556,7 +361,6 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
                 new_content = []
                 for item in processed_msg['content']:
                     if item.get('type') == 'image_url':
-                        # Remove timestamp and ensure we're using the actual file path
                         new_item = {
                             'type': 'image_url',
                             'image_url': item.get('image_url', '')
@@ -571,9 +375,7 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     return prepared_messages
 
 def generate_data_analysis_code(analysis_request: str, file_path: str) -> str:
-    """
-    Generate Python code for data analysis based on user request
-    """
+    """Generate Python code for data analysis based on user request."""
     # Set up imports
     code = """import pandas as pd
 import matplotlib.pyplot as plt
@@ -621,37 +423,34 @@ for col in numeric_cols[:3]:  # Limit to first 3 columns
     plt.tight_layout()
 """
 
-    if 'scatter' in analysis_request.lower():
-        code += """
-# Generate scatter plots for numeric columns
-numeric_cols = df.select_dtypes(include(['number']).columns
-if len(numeric_cols) >= 2:
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(data=df, x=numeric_cols[0], y=numeric_cols[1])
-    plt.title(f'Scatter Plot: {numeric_cols[0]} vs {numeric_cols[1]}')
-    plt.tight_layout()
-"""
-
-    if 'box' in analysis_request.lower() or 'boxplot' in analysis_request.lower():
-        code += """
-# Generate box plots for numeric columns
-numeric_cols = df.select_dtypes(include(['number']).columns
-plt.figure(figsize=(12, 6))
-df[numeric_cols].boxplot()
-plt.xticks(rotation=45)
-plt.title('Box Plots of Numeric Variables')
-plt.tight_layout()
-"""
-
     return code
+
+# Simplified API function without retries to avoid extra costs
+async def call_openai_api(client, messages, model, temperature=0.7, max_tokens=None, tools=None):
+    """Call OpenAI API without retry logic to avoid extra costs."""
+    try:
+        # Single API call without retries
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice="auto" if tools else None
+        )
+        return response
+    except Exception as e:
+        logging.error(f"OpenAI API call failed: {str(e)}")
+        raise e
 
 async def analyze_with_ai(
     messages: List[Dict[str, Any]], 
-    model: str = "gpt-3.5-turbo",
+    model: str = "gpt-4o-mini",
     temperature: float = 0.7,
     file_path: Optional[str] = None,
     analysis_request: Optional[str] = None
 ) -> Dict[str, Any]:
+    """Analyze with AI using optimized token usage."""
     response = {"success": True}
     
     try:
@@ -666,11 +465,11 @@ async def analyze_with_ai(
             # Add analysis context to messages
             prepared_messages.append({
                 "role": "system",
-                "content": f"The user has provided a data file for analysis. Generated code:\n{analysis_code}"
+                "content": f"Data file analysis requested. Generated code available."
             })
         
-        # Add your existing OpenAI API call logic here
-        # ... existing API call code ...
+        # The actual API call would go here
+        # response = await call_openai_api(client, prepared_messages, model, temperature, tools=get_tools_for_model())
         
     except Exception as e:
         logging.error(f"Error in analyze_with_ai: {str(e)}")

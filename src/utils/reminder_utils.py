@@ -346,26 +346,62 @@ class ReminderManager:
                     return now + timedelta(hours=value)
                 elif unit == 'd':  # days
                     return now + timedelta(days=value)
-            
-            # Handle specific time format
-            # HH:MM format for today or tomorrow
-            if ':' in time_str and len(time_str.split(':')) == 2:
-                hour, minute = map(int, time_str.split(':'))
+              # Handle specific time format
+            # Support various time formats: HH:MM, H:MM, H:MM AM/PM, HH:MM AM/PM
+            if ':' in time_str:
+                # Extract time part and additional words
+                time_parts = time_str.split()
+                time_part = time_parts[0]  # e.g., "9:00"
                 
-                # Check if valid time
-                if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-                    logging.warning(f"Invalid time format: {time_str}")
+                # Check for AM/PM
+                is_pm = False
+                for part in time_parts[1:]:
+                    if 'pm' in part.lower():
+                        is_pm = True
+                        break
+                    elif 'am' in part.lower():
+                        is_pm = False
+                        break
+                
+                try:
+                    if ':' in time_part and len(time_part.split(':')) == 2:
+                        hour_str, minute_str = time_part.split(':')
+                        
+                        # Clean minute string to remove non-digit characters
+                        minute_str = ''.join(filter(str.isdigit, minute_str))
+                        if not minute_str:
+                            minute_str = '0'
+                            
+                        hour = int(hour_str)
+                        minute = int(minute_str)
+                        
+                        # Handle AM/PM conversion
+                        if is_pm and hour != 12:
+                            hour += 12
+                        elif not is_pm and hour == 12:
+                            hour = 0
+                        
+                        # Check if valid time
+                        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                            logging.warning(f"Invalid time format: {time_str}")
+                            return None
+                            
+                        # Create datetime for the specified time today in user's timezone
+                        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                        
+                        # Check for "tomorrow" keyword
+                        if 'tomorrow' in time_str.lower():
+                            target += timedelta(days=1)
+                        # If the time has already passed today and no "today" keyword, schedule for tomorrow
+                        elif target <= now and 'today' not in time_str.lower():
+                            target += timedelta(days=1)
+                            
+                        logging.info(f"Parsed time '{time_str}' to {target} (User timezone: {user_tz})")
+                        return target
+                        
+                except ValueError as ve:
+                    logging.error(f"Error parsing time components in '{time_str}': {str(ve)}")
                     return None
-                    
-                # Create datetime for the specified time today in user's timezone
-                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                
-                # If the time has already passed today, schedule for tomorrow
-                if target <= now:
-                    target += timedelta(days=1)
-                    
-                logging.info(f"Parsed time '{time_str}' to {target} (User timezone: {user_tz})")
-                return target
                 
             return None
         except Exception as e:

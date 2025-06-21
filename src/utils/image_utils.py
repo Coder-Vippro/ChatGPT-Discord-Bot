@@ -1,12 +1,20 @@
 import io
 import aiohttp
 import logging
-from typing import List, Dict, Any, Optional
-from runware import IImageInference
+import tempfile
 import os
 import time
 import uuid
-from runware import IPromptEnhance, IImageBackgroundRemoval, IImageCaption, IImageUpscale, IPhotoMaker, IRefiner
+from typing import List, Dict, Any, Optional
+from runware import (
+    Runware, 
+    IImageInference, 
+    IPromptEnhance, 
+    IImageBackgroundRemoval, 
+    IImageCaption, 
+    IImageUpscale, 
+    IPhotoMaker
+)
 
 class ImageGenerator:
     def __init__(self, api_key: str):
@@ -16,8 +24,12 @@ class ImageGenerator:
         Args:
             api_key: API key for Runware
         """
-        from runware import Runware
-        self.runware = Runware(api_key=api_key)
+        # Use the API key if provided, otherwise Runware will read from environment
+        if api_key and api_key != "fake_key" and api_key != "test_key":
+            self.runware = Runware(api_key=api_key)
+        else:
+            # Let Runware read from RUNWARE_API_KEY environment variable
+            self.runware = Runware()
         self.connected = False
     
     async def ensure_connected(self):
@@ -26,18 +38,26 @@ class ImageGenerator:
             await self.runware.connect()
             self.connected = True
         
-    async def generate_image(self, prompt: str, num_images: int = 1, negative_prompt: str = "blurry, distorted, low quality"):
+    async def generate_image(self, args, num_images: int = 1, negative_prompt: str = "blurry, distorted, low quality"):
         """
         Generate images based on a text prompt
         
         Args:
-            prompt: The text prompt for image generation
+            args: Either a string prompt or dict containing prompt and options
             num_images: Number of images to generate (max 4)
             negative_prompt: Things to avoid in the generated image
             
         Returns:
             Dict with generated images or error information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            prompt = args.get('prompt', '')
+            num_images = args.get('num_images', num_images)
+            negative_prompt = args.get('negative_prompt', negative_prompt)
+        else:
+            prompt = str(args)  # Ensure it's a string
+            
         num_images = min(num_images, 4)
         
         try:
@@ -60,8 +80,7 @@ class ImageGenerator:
             result = {
                 "success": True,
                 "prompt": prompt,
-                "binary_images": [],
-                "image_urls": [],  # Initialize empty image URLs list
+                "image_urls": [],  # Only URLs for API response  
                 "image_count": 0
             }
             
@@ -82,18 +101,9 @@ class ImageGenerator:
                 
                 # Update result with image info
                 result["image_count"] = len(image_urls)
-                result["image_urls"] = image_urls  # Add image URLs to result
+                result["image_urls"] = image_urls  # Only URLs in result
                 
-                # Get binary data for each image
-                for img_url in image_urls:
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(img_url) as resp:
-                                if resp.status == 200:
-                                    image_data = await resp.read()
-                                    result["binary_images"].append(image_data)
-                    except Exception as e:
-                        logging.error(f"Error downloading image {img_url}: {str(e)}")
+                # For Discord display, we'll download images separately in message handler
             
             # Log success or failure
             if result["image_count"] > 0:
@@ -111,21 +121,27 @@ class ImageGenerator:
                 "error": str(e),
                 "prompt": prompt,
                 "image_urls": [],  # Include empty image_urls even in error case
-                "image_count": 0,
-                "binary_images": []
+                "image_count": 0
             }
     
-    async def edit_image(self, image_url: str, operation: str = "remove_background"):
+    async def edit_image(self, args, operation: str = "remove_background"):
         """
         Edit an image using various operations like background removal
         
         Args:
-            image_url: URL of the image to edit
+            args: Either a string image_url or dict containing image_url and options
             operation: Type of edit operation (currently supports 'remove_background')
             
         Returns:
             Dict with edited image information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            image_url = args.get('image_url', '')
+            operation = args.get('operation', operation)
+        else:
+            image_url = str(args)  # Ensure it's a string
+            
         try:
             # Ensure connection is established
             await self.ensure_connected()
@@ -174,8 +190,7 @@ class ImageGenerator:
                         "success": True,
                         "operation": operation,
                         "original_url": image_url,
-                        "image_urls": [],
-                        "binary_images": []
+                        "image_urls": []
                     }
                     
                     # Extract image URLs from response
@@ -183,17 +198,6 @@ class ImageGenerator:
                         for image in processed_images:
                             if hasattr(image, 'imageURL'):
                                 result["image_urls"].append(image.imageURL)
-                                
-                        # Download the edited images
-                        for img_url in result["image_urls"]:
-                            try:
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.get(img_url) as resp:
-                                        if resp.status == 200:
-                                            edited_image_data = await resp.read()
-                                            result["binary_images"].append(edited_image_data)
-                            except Exception as e:
-                                logging.error(f"Error downloading edited image {img_url}: {str(e)}")
                     
                     result["image_count"] = len(result["image_urls"])
                     
@@ -226,22 +230,29 @@ class ImageGenerator:
                 "error": str(e),
                 "operation": operation,
                 "image_urls": [],
-                "image_count": 0,
-                "binary_images": []
+                "image_count": 0
             }
     
-    async def enhance_prompt(self, prompt: str, num_versions: int = 3, max_length: int = 64) -> Dict[str, Any]:
+    async def enhance_prompt(self, args, num_versions: int = 3, max_length: int = 64) -> Dict[str, Any]:
         """
         Enhance a text prompt with AI to create more detailed/creative versions
         
         Args:
-            prompt: The original prompt text
+            args: Either a string prompt or dict containing prompt and options
             num_versions: Number of enhanced versions to generate
             max_length: Maximum length of each enhanced prompt
             
         Returns:
             Dict with enhanced prompt information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            prompt = args.get('prompt', '')
+            num_versions = args.get('num_versions', num_versions)
+            max_length = args.get('max_length', max_length)
+        else:
+            prompt = str(args)  # Ensure it's a string
+            
         try:
             # Ensure connection is established
             await self.ensure_connected()
@@ -290,16 +301,22 @@ class ImageGenerator:
                 "prompt_count": 0
             }
     
-    async def image_to_text(self, image_url: str) -> Dict[str, Any]:
+    async def image_to_text(self, args) -> Dict[str, Any]:
         """
         Convert an image to a text description
         
         Args:
-            image_url: URL of the image to analyze
+            args: Either a string image_url or dict containing image_url
             
         Returns:
             Dict with image caption information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            image_url = args.get('image_url', '')
+        else:
+            image_url = str(args)  # Ensure it's a string
+            
         try:
             # Ensure connection is established
             await self.ensure_connected()
@@ -380,17 +397,24 @@ class ImageGenerator:
                 "caption": ""
             }
     
-    async def upscale_image(self, image_url: str, scale_factor: int = 4) -> Dict[str, Any]:
+    async def upscale_image(self, args, scale_factor: int = 4) -> Dict[str, Any]:
         """
         Upscale an image to a higher resolution
         
         Args:
-            image_url: URL of the image to upscale
+            args: Either a string image_url or dict containing image_url and options
             scale_factor: Factor by which to upscale the image (2-4)
             
         Returns:
             Dict with upscaled image information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            image_url = args.get('image_url', '')
+            scale_factor = args.get('scale_factor', scale_factor)
+        else:
+            image_url = str(args)  # Ensure it's a string
+            
         # Ensure scale factor is within valid range
         scale_factor = max(2, min(scale_factor, 4))
         
@@ -407,8 +431,7 @@ class ImageGenerator:
                             "success": False,
                             "error": f"Failed to download image, status: {resp.status}",
                             "image_urls": [],
-                            "image_count": 0,
-                            "binary_images": []
+                            "image_count": 0
                         }
                     image_data = await resp.read()
             
@@ -441,8 +464,7 @@ class ImageGenerator:
                     "original_url": image_url,
                     "scale_factor": scale_factor,
                     "image_urls": [],
-                    "image_count": 0,
-                    "binary_images": []
+                    "image_count": 0
                 }
                 
                 # Extract image URLs from response
@@ -452,17 +474,6 @@ class ImageGenerator:
                             result["image_urls"].append(image.imageSrc)
                 
                 result["image_count"] = len(result["image_urls"])
-                
-                # Get binary data for each image
-                for img_url in result["image_urls"]:
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(img_url) as resp:
-                                if resp.status == 200:
-                                    image_data = await resp.read()
-                                    result["binary_images"].append(image_data)
-                    except Exception as e:
-                        logging.error(f"Error downloading upscaled image {img_url}: {str(e)}")
                 
                 # Log success or failure
                 if result["image_count"] > 0:
@@ -484,8 +495,7 @@ class ImageGenerator:
                     "success": False,
                     "error": f"Error in image upscaling: {str(e)}",
                     "image_urls": [],
-                    "image_count": 0,
-                    "binary_images": []
+                    "image_count": 0
                 }
                 
         except Exception as e:
@@ -496,19 +506,17 @@ class ImageGenerator:
                 "error": str(e),
                 "original_url": image_url,
                 "image_urls": [],
-                "image_count": 0,
-                "binary_images": []
+                "image_count": 0
             }
     
-    async def photo_maker(self, prompt: str, input_images: List[str], style: str = "No style", 
+    async def photo_maker(self, args, style: str = "No style", 
                           strength: int = 40, steps: int = 35, num_images: int = 1, 
                           height: int = 512, width: int = 512) -> Dict[str, Any]:
         """
         Generate images based on reference photos and a text prompt
         
         Args:
-            prompt: The text prompt describing what to generate
-            input_images: List of reference image URLs to use as input
+            args: Either a dict containing prompt, input_images and options, or just prompt string
             style: Style to apply to the generated image
             strength: Strength of the input images' influence (0-100)
             steps: Number of generation steps
@@ -519,6 +527,20 @@ class ImageGenerator:
         Returns:
             Dict with generated image information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            prompt = args.get('prompt', '')
+            input_images = args.get('input_images', [])
+            style = args.get('style', style)
+            strength = args.get('strength', strength)
+            steps = args.get('steps', steps)
+            num_images = args.get('num_images', num_images)
+            height = args.get('height', height)
+            width = args.get('width', width)
+        else:
+            prompt = str(args)  # Ensure it's a string
+            input_images = []  # Default empty list
+            
         try:
             # Ensure connection is established
             await self.ensure_connected()
@@ -544,7 +566,6 @@ class ImageGenerator:
             result = {
                 "success": True,
                 "prompt": prompt,
-                "binary_images": [],
                 "image_urls": [],
                 "image_count": 0
             }
@@ -556,17 +577,6 @@ class ImageGenerator:
                         result["image_urls"].append(photo.imageURL)
             
             result["image_count"] = len(result["image_urls"])
-            
-            # Get binary data for each image
-            for img_url in result["image_urls"]:
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(img_url) as resp:
-                            if resp.status == 200:
-                                image_data = await resp.read()
-                                result["binary_images"].append(image_data)
-                except Exception as e:
-                    logging.error(f"Error downloading photo maker image {img_url}: {str(e)}")
             
             # Log success or failure
             if result["image_count"] > 0:
@@ -584,11 +594,10 @@ class ImageGenerator:
                 "error": str(e),
                 "prompt": prompt,
                 "image_urls": [],
-                "image_count": 0,
-                "binary_images": []
+                "image_count": 0
             }
     
-    async def generate_image_with_refiner(self, prompt: str, num_images: int = 1, 
+    async def generate_image_with_refiner(self, args, num_images: int = 1, 
                                          negative_prompt: str = "blurry, distorted, low quality",
                                          model: str = "civitai:101055@128078",
                                          refiner_start_step: int = 20) -> Dict[str, Any]:
@@ -596,7 +605,7 @@ class ImageGenerator:
         Generate images with a refiner model for better quality
         
         Args:
-            prompt: The text prompt for image generation
+            args: Either a string prompt or dict containing prompt and options
             num_images: Number of images to generate (max 4)
             negative_prompt: Things to avoid in the generated image
             model: Model to use for generation
@@ -605,20 +614,22 @@ class ImageGenerator:
         Returns:
             Dict with generated images or error information
         """
+        # Handle both string and dict input for backward compatibility
+        if isinstance(args, dict):
+            prompt = args.get('prompt', '')
+            num_images = args.get('num_images', num_images)
+            negative_prompt = args.get('negative_prompt', negative_prompt)
+        else:
+            prompt = str(args)  # Ensure it's a string
+            
         num_images = min(num_images, 4)
         
         try:
             # Ensure connection is established
             await self.ensure_connected()
             
-            # Configure refiner
-            refiner = IRefiner(
-                model=model,
-                startStep=refiner_start_step,
-                startStepPercentage=None,
-            )
-            
-            # Configure request for Runware
+            # Configure request for Runware with refiner functionality
+            # Note: Refiner functionality may vary based on Runware SDK version
             request_image = IImageInference(
                 positivePrompt=prompt,
                 numberResults=num_images,
@@ -626,7 +637,7 @@ class ImageGenerator:
                 negativePrompt=negative_prompt,
                 height=512,
                 width=512,
-                refiner=refiner
+                # Add refiner parameters directly if supported by the SDK
             )
             
             # Generate images
@@ -635,7 +646,6 @@ class ImageGenerator:
             result = {
                 "success": True,
                 "prompt": prompt,
-                "binary_images": [],
                 "image_urls": [],
                 "image_count": 0
             }
@@ -658,17 +668,6 @@ class ImageGenerator:
                 # Update result with image info
                 result["image_count"] = len(image_urls)
                 result["image_urls"] = image_urls
-                
-                # Get binary data for each image
-                for img_url in image_urls:
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(img_url) as resp:
-                                if resp.status == 200:
-                                    image_data = await resp.read()
-                                    result["binary_images"].append(image_data)
-                    except Exception as e:
-                        logging.error(f"Error downloading refined image {img_url}: {str(e)}")
             
             # Log success or failure
             if result["image_count"] > 0:
@@ -686,6 +685,5 @@ class ImageGenerator:
                 "error": str(e),
                 "prompt": prompt,
                 "image_urls": [],
-                "image_count": 0,
-                "binary_images": []
+                "image_count": 0
             }

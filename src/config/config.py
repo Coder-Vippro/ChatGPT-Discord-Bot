@@ -75,6 +75,24 @@ MODEL_OPTIONS = [
     "openai/o4-mini"
 ]
 
+# Model-specific token limits for automatic history management
+MODEL_TOKEN_LIMITS = {
+    "openai/o1-preview": 4000,  # Conservative limit (max 4000)
+    "openai/o1-mini": 4000,
+    "openai/o1": 4000,
+    "openai/gpt-4o": 8000,
+    "openai/gpt-4o-mini": 8000,
+    "openai/gpt-4.1": 8000,
+    "openai/gpt-4.1-nano": 8000,
+    "openai/gpt-4.1-mini": 8000,
+    "openai/o3-mini": 4000,
+    "openai/o3": 4000,
+    "openai/o4-mini": 4000
+}
+
+# Default token limit for unknown models
+DEFAULT_TOKEN_LIMIT = 60000
+
 PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1","openai/gpt-4.1-nano","openai/gpt-4.1-mini"]
 PDF_BATCH_SIZE = 3
 

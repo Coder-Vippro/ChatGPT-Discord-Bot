@@ -316,7 +316,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                 encoding_model = model
 
             # Retrieve the appropriate encoding for the selected model
-            encoding = tiktoken.encoding_for_model(encoding_model)
+            encoding = tiktoken.get_encoding("o200k_base")
 
             # Initialize token counts
             input_tokens = 0
