@@ -138,10 +138,15 @@ Once the bot is running, it connects to Discord using credentials from `.env`. A
 The bot supports the following models:
 - openai/gpt-4o
 - openai/gpt-4o-mini
+- openai/gpt-4.1
+- openai/gpt-4.1-nano
+- openai/gpt-4.1-mini
 - openai/o1-preview
 - openai/o1-mini
 - openai/o1
 - openai/o3-mini
+- openai/o3
+- openai/o4-mini
 
 ## Environment Variables
 | Variable | Description | Default |
