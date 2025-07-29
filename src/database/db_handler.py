@@ -7,13 +7,13 @@ import logging
 import re
 
 class DatabaseHandler:
-    # Class-level cache for database results
-    _cache = {}
-    _cache_expiry = {}
-    _cache_lock = asyncio.Lock()
-    
     def __init__(self, mongodb_uri: str):
         """Initialize database connection with optimized settings"""
+        # Instance-level cache for database results
+        self.cache = {}
+        self.cache_expiry = {}
+        self.cache_lock = asyncio.Lock()
+        
         # Set up a connection pool with sensible timeouts
         self.client = AsyncIOMotorClient(
             mongodb_uri,
@@ -34,6 +34,7 @@ class DatabaseHandler:
         self.whitelist_collection = self.db.whitelist
         self.logs_collection = self.db.logs
         self.reminders_collection = self.db.reminders
+        self.user_preferences_collection = self.db.user_preferences  # New collection for preferences
         
         logging.info("Database handler initialized")
     
@@ -43,19 +44,19 @@ class DatabaseHandler:
         current_time = datetime.now()
         
         # Check if we have a cached result that's still valid
-        async with self._cache_lock:
-            if (cache_key in self._cache and 
-                cache_key in self._cache_expiry and 
-                current_time < self._cache_expiry[cache_key]):
-                return self._cache[cache_key]
+        async with self.cache_lock:
+            if (cache_key in self.cache and 
+                cache_key in self.cache_expiry and 
+                current_time < self.cache_expiry[cache_key]):
+                return self.cache[cache_key]
         
         # Not in cache or expired, fetch new result
         result = await fetch_func()
         
         # Cache the new result
-        async with self._cache_lock:
-            self._cache[cache_key] = result
-            self._cache_expiry[cache_key] = current_time + timedelta(seconds=expiry_seconds)
+        async with self.cache_lock:
+            self.cache[cache_key] = result
+            self.cache_expiry[cache_key] = current_time + timedelta(seconds=expiry_seconds)
         
         return result
     

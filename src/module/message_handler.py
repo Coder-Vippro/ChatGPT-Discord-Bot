@@ -15,10 +15,14 @@ import base64
 import traceback
 import tiktoken
 from datetime import datetime, timedelta
+from pathlib import Path
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
+from src.utils.model_selector import model_selector
+from src.utils.user_preferences import UserPreferences
+from src.utils.conversation_manager import ConversationSummarizer
 from src.config.config import PDF_ALLOWED_MODELS, MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT
 
 # Global task and rate limiting tracking
@@ -80,6 +84,10 @@ class MessageHandler:
         
         # Initialize reminder manager
         self.reminder_manager = ReminderManager(bot, db_handler)
+        
+        # Initialize enhancement utilities
+        self.user_prefs_manager = UserPreferences(db_handler)
+        self.conversation_summarizer = ConversationSummarizer(openai_client, db_handler)
         
         # Tool mapping for API integration
         self.tool_mapping = {
@@ -822,6 +830,63 @@ class MessageHandler:
             # Convert string messages to message format if needed
             if isinstance(current_message, str):
                 current_message = {"role": "user", "content": current_message}
+            
+            # ===========================================
+            # ENHANCED FEATURES INTEGRATION
+            # ===========================================
+            
+            # Get user preferences
+            user_prefs = await self.user_prefs_manager.get_user_preferences(user_id)
+            
+            # Smart model selection if enabled
+            if user_prefs.get('auto_model_selection', True):
+                # Extract text content for analysis
+                user_text = ""
+                if isinstance(current_message.get('content'), list):
+                    for part in current_message['content']:
+                        if isinstance(part, dict) and part.get('type') == 'text':
+                            user_text += part.get('text', '') + " "
+                elif isinstance(current_message.get('content'), str):
+                    user_text = current_message['content']
+                
+                # Get smart model suggestion
+                if user_text.strip():
+                    suggested_model, reason = model_selector.suggest_model(
+                        user_text, 
+                        user_prefs.get('preferred_model')
+                    )
+                    
+                    # Use suggested model if different from current and user hasn't explicitly set one
+                    if (suggested_model != model and 
+                        not user_prefs.get('preferred_model') and 
+                        suggested_model in ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/o1-preview', 'openai/o1-mini']):
+                        
+                        old_model = model
+                        model = suggested_model
+                        
+                        # Optionally notify user about model switch
+                        if user_prefs.get('show_model_suggestions', True):
+                            try:
+                                await message.channel.send(
+                                    f"🧠 **Smart Model Selection:** Switched to `{model}` for this task.\n"
+                                    f"💡 **Reason:** {reason}\n"
+                                    f"*Use `/preferences set auto_model_selection false` to disable this feature*",
+                                    ephemeral=True
+                                )
+                            except:
+                                # If ephemeral fails, just log it
+                                logging.info(f"Auto-selected model {model} for user {user_id}: {reason}")
+            
+            # Conversation management with summarization
+            if user_prefs.get('enable_conversation_summary', True):
+                # Manage conversation length and summarize if needed
+                history = await self.conversation_summarizer.manage_conversation_length(user_id, history)
+                # Update history in database with managed version
+                await self.db.save_history(user_id, history)
+            
+            # ===========================================
+            # ORIGINAL PROCESSING LOGIC (Enhanced)
+            # ===========================================
             
             # Process messages based on the model's capabilities
             messages_for_api = []

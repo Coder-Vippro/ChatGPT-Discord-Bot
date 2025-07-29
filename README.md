@@ -6,6 +6,10 @@ Welcome to **ChatGPT Discord Bot**! This bot provides a powerful AI assistant fo
 
 ## Features
 - **Advanced AI Conversations**: Uses OpenAI's latest models (including openai/gpt-4o) for natural language interactions
+- **🆕 Smart Model Selection**: Automatically suggests the best AI model based on task type (coding, reasoning, creative, etc.)
+- **🆕 User Preferences**: Comprehensive personalization system for customizing bot behavior and settings
+- **🆕 Conversation Management**: Intelligent context management with automatic summarization for long conversations
+- **🆕 Enhanced File Processing**: Support for Word docs, PowerPoint, code files, and many more formats beyond PDF/CSV
 - **Image Generation**: Creates custom images from text prompts using Runware's API
 - **Data Analysis**: Analyzes CSV and Excel files with visualizations (distributions, correlations, box plots, etc.)
 - **Code Interpretation**: Executes Python code for calculations and data processing
@@ -15,6 +19,7 @@ Welcome to **ChatGPT Discord Bot**! This bot provides a powerful AI assistant fo
   - **Web Scraping**: Extracts and summarizes content from websites
 - **PDF Analysis**: Processes and analyzes PDF documents
 - **User Statistics**: Tracks token usage and model selection per user
+- **🆕 Enhanced Help System**: Interactive help with feature discovery and detailed guides
 - **Dockerized Deployment**: Ready for easy deployment with Docker
 - **Automated CI/CD**: Integrated with GitHub Actions
 
@@ -121,14 +126,55 @@ To get started, ensure you have:
 ## Usage
 Once the bot is running, it connects to Discord using credentials from `.env`. Available features include:
 
+## 🆕 What's New - Enhanced Features
+
+This bot now includes several powerful enhancements to improve your experience:
+
+### 🧠 Smart Model Selection
+The bot automatically analyzes your request and suggests the best AI model:
+- **Coding tasks** → `openai/gpt-4o` or `openai/o1-preview`
+- **Complex reasoning** → `openai/o1-preview` or `openai/o1`
+- **Creative writing** → `openai/gpt-4o` or `openai/gpt-4o-mini`
+- **Quick questions** → `openai/gpt-4o-mini`
+
+### ⚙️ Personalization
+Customize your bot experience with `/preferences`:
+- Set your preferred AI model
+- Choose response style (balanced, concise, detailed)
+- Enable/disable automatic features
+- Configure language and timezone preferences
+
+### 📊 Conversation Management
+- Automatic conversation summarization for long chats
+- Token usage monitoring with `/conversation_stats`
+- Smart context management to maintain conversation quality
+
+### 📁 Enhanced File Processing
+Process many more file types with `/process_file`:
+- **Documents**: Word (.docx), PowerPoint (.pptx), Markdown
+- **Data**: JSON, YAML, advanced CSV/Excel analysis
+- **Code**: Python, JavaScript, HTML, CSS, and more
+- **Logs**: Error analysis and insights
+
+For detailed information, see [ENHANCEMENTS.md](ENHANCEMENTS.md) or use `/help_enhanced` in Discord.
+
 ### Text Commands
 - **Normal chat**: Ping the bot with a question or send a DM to start a conversation
+- **🆕 Smart Model Selection**: The bot automatically suggests the best AI model for your task
 - **Image Generation**: `/generate prompt: "A futuristic cityscape"`
 - **Web Content**: `/web url: "https://example.com"`
 - **Google Search**: `/search prompt: "latest news in Vietnam"`
+- **🆕 Personalization**: `/preferences set response_style detailed` to customize your experience
+- **🆕 File Processing**: `/process_file` to analyze Word docs, PowerPoint, code files, and more
+- **🆕 Smart Help**: `/help_enhanced` for detailed feature discovery and guides
 - **User Statistics**: `/user_stat` - Get your token usage and model information
+- **🆕 Conversation Stats**: `/conversation_stats` - Monitor your conversation health and token usage
 
 ### Advanced Features
+- **🆕 Smart Model Selection**: Automatically chooses the optimal AI model based on your task type
+- **🆕 User Preferences**: Customize response style, enable/disable features, set default models
+- **🆕 Conversation Management**: Automatic summarization of long conversations to maintain context
+- **🆕 Enhanced File Support**: Process Word documents, PowerPoint presentations, code files, JSON, YAML, and more
 - **Data Analysis**: Upload CSV or Excel files for automatic analysis and visualization
 - **Code Execution**: The bot can execute Python code to solve problems or create visualizations
 - **Reminders**: Ask the bot to set reminders like "Remind me to check email in 30 minutes"
