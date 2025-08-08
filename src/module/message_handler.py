@@ -174,7 +174,7 @@ class MessageHandler:
         """Create a reusable aiohttp session for better performance"""
         if self.aiohttp_session is None or self.aiohttp_session.closed:
             self.aiohttp_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=120),
+                timeout=aiohttp.ClientTimeout(total=240),
                 connector=aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
             )
         
@@ -857,6 +857,42 @@ class MessageHandler:
                 history.append(current_message)
                 messages_for_api = prepare_messages_for_api(history)
             
+            # Proactively trim history to avoid context overload while preserving system prompt
+            current_tokens = self._count_tokens(messages_for_api)
+            token_limit = MODEL_TOKEN_LIMITS.get(model, DEFAULT_TOKEN_LIMIT)
+            max_tokens = int(token_limit * 0.8)  # Use 80% of limit to leave room for response
+            
+            if current_tokens > max_tokens:
+                logging.info(f"Proactively trimming history: {current_tokens} tokens > {max_tokens} limit for {model}")
+                
+                if model in ["openai/o1-mini", "openai/o1-preview"]:
+                    # For o1 models, trim the history without system prompt
+                    trimmed_history_without_system = self._trim_history_to_token_limit(history_without_system, model, max_tokens)
+                    messages_for_api = prepare_messages_for_api(trimmed_history_without_system)
+                    
+                    # Update the history tracking
+                    history_without_system = trimmed_history_without_system
+                else:
+                    # For regular models, trim the full history (preserving system prompt)
+                    trimmed_history = self._trim_history_to_token_limit(history, model, max_tokens)
+                    messages_for_api = prepare_messages_for_api(trimmed_history)
+                    
+                    # Update the history tracking
+                    history = trimmed_history
+                
+                # Save the trimmed history immediately to keep it in sync
+                if model in ["openai/o1-mini", "openai/o1-preview"]:
+                    new_history = []
+                    if system_content:
+                        new_history.append({"role": "system", "content": system_content})
+                    new_history.extend(history_without_system[1:])  # Skip the "Instructions" message
+                    await self.db.save_history(user_id, new_history)
+                else:
+                    await self.db.save_history(user_id, history)
+                
+                final_tokens = self._count_tokens(messages_for_api)
+                logging.info(f"History trimmed from {current_tokens} to {final_tokens} tokens")
+            
             # Determine which models should have tools available
             # openai/o1-mini and openai/o1-preview do not support tools
             use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
@@ -865,10 +901,17 @@ class MessageHandler:
             api_params = {
                 "model": model,
                 "messages": messages_for_api,
-                "temperature": 0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
-                "top_p": 0.7 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
-                "timeout": 120  # Increased timeout for better response handling
+                "timeout": 240  # Increased timeout for better response handling
             }
+            
+            # Add temperature and top_p only for models that support them (exclude GPT-5 family)
+            if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
+                api_params["temperature"] = 0.3
+                api_params["top_p"] = 0.7
+            elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                # For other models (not GPT-4o family and not GPT-5 family)
+                api_params["temperature"] = 1
+                api_params["top_p"] = 1
             
             # Add tools if using a supported model
             if use_tools:
@@ -879,59 +922,22 @@ class MessageHandler:
             chart_id = None
             image_urls = []  # Will store unique image URLs
             
-            # Make the initial API call without retry logic to avoid extra costs
+            # Make the initial API call
             try:
                 response = await self.client.chat.completions.create(**api_params)
             except Exception as e:
-                # Handle 413 Request Entity Too Large error automatically
+                # Handle 413 Request Entity Too Large error with a user-friendly message
                 if "413" in str(e) or "tokens_limit_reached" in str(e) or "Request body too large" in str(e):
-                    logging.warning(f"Token limit exceeded for model {model}, automatically trimming history...")
-                    
-                    # Trim the history to fit the model's token limit
-                    current_tokens = self._count_tokens(messages_for_api)
-                    logging.info(f"Current message tokens: {current_tokens}")
-                    
-                    if model in ["openai/o1-mini", "openai/o1-preview"]:
-                        # For o1 models, use the trimmed history without system prompt
-                        trimmed_history_without_system = self._trim_history_to_token_limit(history_without_system, model)
-                        messages_for_api = prepare_messages_for_api(trimmed_history_without_system)
-                    else:
-                        # For regular models, trim the full history
-                        trimmed_history = self._trim_history_to_token_limit(history, model)
-                        messages_for_api = prepare_messages_for_api(trimmed_history)
-                    
-                    # Update API parameters with trimmed messages
-                    api_params["messages"] = messages_for_api
-                    
-                    # Save the trimmed history to prevent this issue in the future
-                    if model in ["openai/o1-mini", "openai/o1-preview"]:
-                        # For o1 models, save the trimmed history back to the database
-                        new_history = []
-                        if system_content:
-                            new_history.append({"role": "system", "content": system_content})
-                        new_history.extend(trimmed_history_without_system[1:])  # Skip the "Instructions" message
-                        await self.db.save_history(user_id, new_history)
-                    else:
-                        await self.db.save_history(user_id, trimmed_history)
-                    
-                    # Inform user about the automatic cleanup
-                    await message.channel.send("🔧 **Auto-optimized conversation history** - Removed older messages to fit model limits.")
-                    
-                    # Try the API call again with trimmed history
-                    try:
-                        response = await self.client.chat.completions.create(**api_params)
-                        logging.info(f"Successfully processed request after history trimming for model {model}")
-                    except Exception as retry_error:
-                        # If it still fails, provide a helpful error message
-                        await message.channel.send(
-                            f"❌ **Request still too large for {model}**\n"
-                            f"Even after optimizing history, the request is too large.\n"
-                            f"Try:\n"
-                            f"• Using a model with higher token limits\n"
-                            f"• Reducing the size of your current message\n"
-                            f"• Using `/clear_history` to start fresh"
-                        )
-                        return
+                    await message.channel.send(
+                        f"❌ **Request too large for {model}**\n"
+                        f"Your conversation history or message is too large for this model.\n"
+                        f"Try:\n"
+                        f"• Using `/reset` to start fresh\n"
+                        f"• Using a model with higher token limits\n"
+                        f"• Reducing the size of your current message\n"
+                        f"• Breaking up large files into smaller pieces"
+                    )
+                    return
                 else:
                     # Re-raise other errors
                     raise e
@@ -1007,12 +1013,20 @@ class MessageHandler:
                 
                 # If tool calls were processed, make another API call with the updated messages
                 if tool_calls_processed and updated_messages:
-                    response = await self.client.chat.completions.create(
-                        model=model,
-                        messages=updated_messages,
-                        temperature=0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
-                        timeout=120
-                    )
+                    # Prepare API parameters for follow-up call
+                    follow_up_params = {
+                        "model": model,
+                        "messages": updated_messages,
+                        "timeout": 240
+                    }
+                    
+                    # Add temperature only for models that support it (exclude GPT-5 family)
+                    if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
+                        follow_up_params["temperature"] = 0.3
+                    elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                        follow_up_params["temperature"] = 1
+                    
+                    response = await self.client.chat.completions.create(**follow_up_params)
             
             reply = response.choices[0].message.content
             

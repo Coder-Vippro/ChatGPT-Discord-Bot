@@ -156,11 +156,16 @@ async def process_pdf_batch(model: str, client, user_prompt: str, batch_content:
                 ]
             
             # Add await here
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1
-            )
+            api_params = {
+                "model": model,
+                "messages": messages
+            }
+            
+            # Add temperature only for models that support it (exclude GPT-5 family)
+            if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                api_params["temperature"] = 0.1
+            
+            response = await client.chat.completions.create(**api_params)
             
             reply = response.choices[0].message.content
             

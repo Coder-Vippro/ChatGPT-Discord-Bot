@@ -192,7 +192,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                         "input_data": {"type": "string", "description": "Optional input data"},
                         "install_packages": {"type": "array", "items": {"type": "string"}},
                         "enable_visualization": {"type": "boolean", "description": "For charts/graphs"},
-                        "timeout": {"type": "integer", "default": 30, "minimum": 1, "maximum": 120}
+                        "timeout": {"type": "integer", "default": 30, "minimum": 1, "maximum": 240}
                     },
                     "required": ["code"]
                 }
@@ -429,15 +429,21 @@ for col in numeric_cols[:3]:  # Limit to first 3 columns
 async def call_openai_api(client, messages, model, temperature=0.7, max_tokens=None, tools=None):
     """Call OpenAI API without retry logic to avoid extra costs."""
     try:
+        # Prepare API parameters
+        api_params = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": "auto" if tools else None
+        }
+        
+        # Add temperature only for models that support it (exclude GPT-5 family)
+        if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+            api_params["temperature"] = temperature
+        
         # Single API call without retries
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            tools=tools,
-            tool_choice="auto" if tools else None
-        )
+        response = await client.chat.completions.create(**api_params)
         return response
     except Exception as e:
         logging.error(f"OpenAI API call failed: {str(e)}")

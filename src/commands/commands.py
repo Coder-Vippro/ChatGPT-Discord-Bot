@@ -156,11 +156,16 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                     ]
 
                 # Send to the AI model
-                response = await openai_client.chat.completions.create(
-                    model=model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
-                    messages=messages,
-                    temperature=0.5
-                )
+                api_params = {
+                    "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
+                    "messages": messages
+                }
+                
+                # Add temperature only for models that support it (exclude GPT-5 family)
+                if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                    api_params["temperature"] = 0.5
+                
+                response = await openai_client.chat.completions.create(**api_params)
 
                 reply = response.choices[0].message.content
                 
@@ -221,12 +226,17 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                         {"role": "user", "content": f"Content from {url}:\n{content}"}
                     ]
 
-                response = await openai_client.chat.completions.create(
-                    model=model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
-                    messages=messages,
-                    temperature=0.3,
-                    top_p=0.7
-                )
+                api_params = {
+                    "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
+                    "messages": messages
+                }
+                
+                # Add temperature and top_p only for models that support them (exclude GPT-5 family)
+                if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                    api_params["temperature"] = 0.3
+                    api_params["top_p"] = 0.7
+                
+                response = await openai_client.chat.completions.create(**api_params)
 
                 reply = response.choices[0].message.content
                 
