@@ -3,7 +3,7 @@ import asyncio
 import discord
 import logging
 from typing import List, Dict, Any, Optional, Tuple
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from src.config.config import PDF_BATCH_SIZE
 from src.utils.openai_utils import trim_content_to_token_limit
 
