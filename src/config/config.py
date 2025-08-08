@@ -67,6 +67,10 @@ MODEL_OPTIONS = [
     "openai/gpt-4.1",
     "openai/gpt-4.1-nano",
     "openai/gpt-4.1-mini",
+    "openai/gpt-5",
+    "openai/gpt-5-nano",
+    "openai/gpt-5-mini",
+    "openai/gpt-5-chat",
     "openai/o1-preview",
     "openai/o1-mini",
     "openai/o1",
@@ -87,13 +91,20 @@ MODEL_TOKEN_LIMITS = {
     "openai/gpt-4.1-mini": 8000,
     "openai/o3-mini": 4000,
     "openai/o3": 4000,
-    "openai/o4-mini": 4000
+    "openai/o4-mini": 4000,
+    "openai/gpt-5": 8000,
+    "openai/gpt-5-nano": 8000,
+    "openai/gpt-5-mini": 8000,
+    "openai/gpt-5-chat": 8000
 }
 
 # Default token limit for unknown models
 DEFAULT_TOKEN_LIMIT = 60000
 
-PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1","openai/gpt-4.1-nano","openai/gpt-4.1-mini"]
+# Default model for new users
+DEFAULT_MODEL = "openai/gpt-4.1"
+
+PDF_ALLOWED_MODELS = ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1","openai/gpt-4.1-nano","openai/gpt-4.1-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]
 PDF_BATCH_SIZE = 3
 
 # Prompt templates

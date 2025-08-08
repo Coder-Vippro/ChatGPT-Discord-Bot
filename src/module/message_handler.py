@@ -19,7 +19,7 @@ from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api,
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
-from src.config.config import PDF_ALLOWED_MODELS, MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT
+from src.config.config import PDF_ALLOWED_MODELS, MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT, DEFAULT_MODEL
 
 # Global task and rate limiting tracking
 user_tasks = {}
@@ -700,7 +700,7 @@ class MessageHandler:
                 
                 # Get history and model preferences first    
                 history = await self.db.get_history(user_id)
-                model = await self.db.get_user_model(user_id) or "openai/gpt-4.1-mini"  # Default to openai/gpt-4.1-mini if no model set
+                model = await self.db.get_user_model(user_id) or DEFAULT_MODEL  # Default to configured default model if no model set
                 
                 # Handle PDF files
                 if message.attachments:
@@ -859,14 +859,14 @@ class MessageHandler:
             
             # Determine which models should have tools available
             # openai/o1-mini and openai/o1-preview do not support tools
-            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
+            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
             
             # Prepare API call parameters
             api_params = {
                 "model": model,
                 "messages": messages_for_api,
-                "temperature": 0.3 if model in ["openai/gpt-4o", "openai/openai/gpt-4o-mini"] else 1,
-                "top_p": 0.7 if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else 1,
+                "temperature": 0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
+                "top_p": 0.7 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
                 "timeout": 120  # Increased timeout for better response handling
             }
             
@@ -1010,7 +1010,7 @@ class MessageHandler:
                     response = await self.client.chat.completions.create(
                         model=model,
                         messages=updated_messages,
-                        temperature=0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else 1,
+                        temperature=0.3 if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else 1,
                         timeout=120
                     )
             
@@ -1033,7 +1033,7 @@ class MessageHandler:
                     })
             
             # Store the response in history for models that support it
-            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1", "openai/o1-mini", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano", "openai/gpt-4.1-mini", "openai/o3", "openai/o4-mini", "openai/o1-preview"]:
+            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o1-mini", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano", "openai/gpt-4.1-mini", "openai/o3", "openai/o4-mini", "openai/o1-preview"]:
                 if model in ["openai/o1-mini", "openai/o1-preview"]:
                     # For models without system prompt support, keep track separately
                     if has_images:
@@ -1421,7 +1421,12 @@ class MessageHandler:
                 msg_tokens = self._count_tokens([msg])
                 
                 if current_tokens + msg_tokens <= available_tokens:
-                    trimmed_history.insert(-1 if system_message else 0, msg)  # Insert before system or at start
+                    if system_message:
+                        # Insert after system message (position 1)
+                        trimmed_history.insert(1, msg)
+                    else:
+                        # Insert at start if no system message
+                        trimmed_history.insert(0, msg)
                     current_tokens += msg_tokens
                 else:
                     # Stop adding more messages

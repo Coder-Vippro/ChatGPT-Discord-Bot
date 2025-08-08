@@ -6,7 +6,7 @@ import io
 import asyncio
 from typing import Optional, Dict, List, Any, Callable
 
-from src.config.config import MODEL_OPTIONS, PDF_ALLOWED_MODELS
+from src.config.config import MODEL_OPTIONS, PDF_ALLOWED_MODELS, DEFAULT_MODEL
 from src.utils.image_utils import ImageGenerator
 from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
@@ -119,7 +119,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         
         async def process_search(interaction: discord.Interaction, query: str):
             user_id = interaction.user.id
-            model = await db_handler.get_user_model(user_id) or "openai/gpt-4.1-mini"
+            model = await db_handler.get_user_model(user_id) or DEFAULT_MODEL
             history = await db_handler.get_history(user_id)
 
             try:
@@ -157,7 +157,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
 
                 # Send to the AI model
                 response = await openai_client.chat.completions.create(
-                    model=model if model in ["openai/gpt-4o", "openai/openai/gpt-4o-mini"] else "openai/gpt-4o",
+                    model=model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
                     messages=messages,
                     temperature=0.5
                 )
@@ -200,7 +200,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         
         async def process_web(interaction: discord.Interaction, url: str):
             user_id = interaction.user.id
-            model = await db_handler.get_user_model(user_id) or "openai/gpt-4.1-mini"
+            model = await db_handler.get_user_model(user_id) or DEFAULT_MODEL
             history = await db_handler.get_history(user_id)
 
             try:
@@ -222,7 +222,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                     ]
 
                 response = await openai_client.chat.completions.create(
-                    model=model if model in ["openai/gpt-4o", "openai/gpt-4o-mini"] else "openai/gpt-4o",
+                    model=model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
                     messages=messages,
                     temperature=0.3,
                     top_p=0.7
@@ -307,10 +307,10 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
             
             user_id = interaction.user.id
             history = await db_handler.get_history(user_id)
-            model = await db_handler.get_user_model(user_id) or "openai/gpt-4.1-mini"  # Default model
+            model = await db_handler.get_user_model(user_id) or DEFAULT_MODEL  # Default model
 
             # Adjust model for encoding purposes
-            if model in ["openai/gpt-4o", "openai/o1", "openai/o1-preview", "openai/o1-mini", "openai/o3-mini"]:
+            if model in ["openai/gpt-4o", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o1-preview", "openai/o1-mini", "openai/o3-mini"]:
                 encoding_model = "openai/gpt-4o"
             else:
                 encoding_model = model
@@ -362,7 +362,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         """Sends a list of available commands to the user."""
         help_message = (
             "**Available commands:**\n"
-            "/choose_model - Select which AI model to use for responses (openai/gpt-4o, openai/gpt-4o-mini, openai/o1-preview, openai/o1-mini).\n"
+            "/choose_model - Select which AI model to use for responses (openai/gpt-4o, openai/gpt-4o-mini, openai/gpt-5, openai/gpt-5-nano, openai/gpt-5-mini, openai/gpt-5-chat, openai/o1-preview, openai/o1-mini).\n"
             "/search `<query>` - Search Google and send results to the AI model.\n"
             "/web `<url>` - Scrape a webpage and send the data to the AI model.\n"
             "/generate `<prompt>` - Generate an image from a text prompt.\n"
