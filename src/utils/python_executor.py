@@ -246,69 +246,48 @@ async def execute_code_safely(code: str, input_data: str, timeout: int) -> Dict[
         except ImportError:
             pd = None
         
-        # Create execution namespace
+        # Create minimal execution namespace (memory optimized)
         exec_globals = {
             "__builtins__": {
-                # Safe builtins
-                "print": print,
-                "len": len,
-                "range": range,
-                "enumerate": enumerate,
-                "zip": zip,
-                "map": map,
-                "filter": filter,
-                "sum": sum,
-                "min": min,
-                "max": max,
-                "abs": abs,
-                "round": round,
-                "sorted": sorted,
-                "reversed": reversed,
-                "list": list,
-                "dict": dict,
-                "set": set,
-                "tuple": tuple,
-                "str": str,
-                "int": int,
-                "float": float,
-                "bool": bool,
-                "type": type,
-                "isinstance": isinstance,
-                "hasattr": hasattr,
-                "getattr": getattr,
-                "setattr": setattr,
-                "dir": dir,
-                "help": help,
-                "__import__": __import__,  # Allow controlled imports
-                "ValueError": ValueError,
-                "TypeError": TypeError,
-                "IndexError": IndexError,
-                "KeyError": KeyError,
-                "AttributeError": AttributeError,
-                "ImportError": ImportError,
-                "Exception": Exception,
+                # Essential builtins only
+                "print": print, "len": len, "range": range, "enumerate": enumerate,
+                "zip": zip, "sum": sum, "min": min, "max": max, "abs": abs,
+                "round": round, "sorted": sorted, "list": list, "dict": dict,
+                "set": set, "tuple": tuple, "str": str, "int": int, "float": float,
+                "bool": bool, "type": type, "isinstance": isinstance,
+                "__import__": __import__,  # Fixed: Added missing __import__
+                "ValueError": ValueError, "TypeError": TypeError, "IndexError": IndexError,
+                "KeyError": KeyError, "Exception": Exception,
             },
-            # Add available libraries
+            # Essential modules only
             "math": __import__("math"),
-            "random": __import__("random"),
             "json": __import__("json"),
             "time": __import__("time"),
-            "datetime": __import__("datetime"),
-            "collections": __import__("collections"),
-            "itertools": __import__("itertools"),
-            "functools": __import__("functools"),
         }
         
-        # Add optional libraries if available
-        if np is not None:
-            exec_globals["np"] = np
-            exec_globals["numpy"] = np
-        if pd is not None:
-            exec_globals["pd"] = pd
-            exec_globals["pandas"] = pd
-        if plt is not None:
-            exec_globals["plt"] = plt
-            exec_globals["matplotlib"] = matplotlib
+        # Add optional libraries only when needed (lazy loading for memory)
+        if "numpy" in code or "np." in code:
+            try:
+                exec_globals["np"] = __import__("numpy")
+                exec_globals["numpy"] = __import__("numpy")
+            except ImportError:
+                pass
+                
+        if "pandas" in code or "pd." in code:
+            try:
+                exec_globals["pd"] = __import__("pandas")
+                exec_globals["pandas"] = __import__("pandas")
+            except ImportError:
+                pass
+                
+        if "matplotlib" in code or "plt." in code:
+            try:
+                matplotlib = __import__("matplotlib")
+                matplotlib.use('Agg')
+                exec_globals["plt"] = __import__("matplotlib.pyplot")
+                exec_globals["matplotlib"] = matplotlib
+            except ImportError:
+                pass
         
         # Override input function if input_data is provided
         if input_data:
@@ -366,6 +345,14 @@ async def execute_code_safely(code: str, input_data: str, timeout: int) -> Dict[
         # Get the outputs
         stdout_output = stdout_capture.getvalue()
         stderr_output = stderr_capture.getvalue()
+        
+        # Force cleanup and garbage collection for memory optimization
+        import gc
+        if 'plt' in exec_globals:
+            plt = exec_globals['plt']
+            plt.close('all')
+        exec_globals.clear()  # Clear execution environment
+        gc.collect()  # Force garbage collection
         
         # Check for any image paths in the output
         image_paths = re.findall(IMAGE_PATH_PATTERN, stdout_output)

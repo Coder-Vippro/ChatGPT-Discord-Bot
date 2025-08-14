@@ -42,9 +42,8 @@ DATA_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 # File extensions for image files (should never be processed as data)
 IMAGE_FILE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tiff', '.ico']
 
-# Storage for user data files and charts
-user_data_files = {}
-user_charts = {}
+# Note: Removed global user_data_files and user_charts dictionaries for memory optimization
+# Data files are now processed immediately and cleaned up
 
 # Try to import data analysis libraries early
 try:
@@ -81,6 +80,11 @@ class MessageHandler:
         # Initialize reminder manager
         self.reminder_manager = ReminderManager(bot, db_handler)
         
+        # Memory-optimized user data tracking (with TTL)
+        self.user_data_files = {}  # Will be cleaned up periodically
+        self.user_charts = {}      # Will be cleaned up periodically
+        self.max_user_files = 20   # Limit concurrent user files
+        
         # Tool mapping for API integration
         self.tool_mapping = {
             "google_search": self._google_search,
@@ -98,8 +102,10 @@ class MessageHandler:
             "generate_image_with_refiner": self._generate_image_with_refiner
         }
         
-        # Thread pool for CPU-bound tasks
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        # Thread pool for CPU-bound tasks (balanced for performance)
+        import multiprocessing
+        max_workers = min(4, multiprocessing.cpu_count())  # Increased to 4 for better concurrency
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         
         # Create session for HTTP requests
         asyncio.create_task(self._setup_aiohttp_session())
@@ -171,11 +177,16 @@ class MessageHandler:
             logging.error(f"Error installing packages: {str(e)}")
     
     async def _setup_aiohttp_session(self):
-        """Create a reusable aiohttp session for better performance"""
+        """Create a memory-optimized aiohttp session"""
         if self.aiohttp_session is None or self.aiohttp_session.closed:
             self.aiohttp_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=240),
-                connector=aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
+                timeout=aiohttp.ClientTimeout(total=120),  # Reduced timeout
+                connector=aiohttp.TCPConnector(
+                    limit=8,  # Reduced from 20 to 8
+                    ttl_dns_cache=600,  # Increased DNS cache for efficiency
+                    enable_cleanup_closed=True,  # Enable connection cleanup
+                    keepalive_timeout=30  # Shorter keepalive
+                )
             )
         
     def _setup_event_handlers(self):
@@ -204,8 +215,8 @@ class MessageHandler:
                 user_id = self._find_user_id_from_current_task()
             
             # Add file context if user has uploaded data files
-            if user_id and user_id in user_data_files:
-                file_info = user_data_files[user_id]
+            if user_id and user_id in self.user_data_files:
+                file_info = self.user_data_files[user_id]
                 file_context = f"\n\n# Data file available: {file_info['filename']}\n"
                 file_context += f"# File path: {file_info['file_path']}\n"
                 file_context += f"# You can access this file using: pd.read_csv('{file_info['file_path']}') or similar\n\n"
@@ -502,7 +513,10 @@ class MessageHandler:
                 "file_path": temp_file_path,
                 "timestamp": datetime.now()
             }
-            user_data_files[user_id] = file_info
+            
+            # Memory-efficient storage with cleanup
+            self._cleanup_old_user_files()
+            self.user_data_files[user_id] = file_info
             
             logging.info(f"Downloaded and saved data file: {temp_file_path}")
             return {"success": True, "file_info": file_info}
@@ -1061,9 +1075,9 @@ class MessageHandler:
                         new_history.append({"role": "system", "content": system_content})
                     new_history.extend(history_without_system[1:])  # Skip the first "Instructions" message
                     
-                    # Only keep a reasonable amount of history
-                    if len(new_history) > 20:
-                        new_history = new_history[:1] + new_history[-19:]  # Keep system prompt + last 19 messages
+                    # Only keep a reasonable amount of history (reduced for memory)
+                    if len(new_history) > 15:  # Reduced from 20 to 15
+                        new_history = new_history[:1] + new_history[-14:]  # Keep system prompt + last 14 messages
                         
                     await self.db.save_history(user_id, new_history)
                 else:
@@ -1073,9 +1087,9 @@ class MessageHandler:
                     else:
                         history.append({"role": "assistant", "content": reply})
                     
-                    # Only keep a reasonable amount of history
-                    if len(history) > 20:
-                        history = history[:1] + history[-19:]  # Keep system prompt + last 19 messages
+                    # Only keep a reasonable amount of history (reduced for memory)
+                    if len(history) > 15:  # Reduced from 20 to 15
+                        history = history[:1] + history[-14:]  # Keep system prompt + last 14 messages
                         
                     await self.db.save_history(user_id, history)
             
@@ -1083,9 +1097,9 @@ class MessageHandler:
             await send_response(message.channel, reply)
             
             # Handle charts from code interpreter if present
-            if chart_id and chart_id in user_charts:
+            if chart_id and chart_id in self.user_charts:
                 try:
-                    chart_data = user_charts[chart_id]["image"]
+                    chart_data = self.user_charts[chart_id]["image"]
                     chart_filename = f"chart_{chart_id}.png"
                     
                     # Send the chart to Discord and get the URL
@@ -1303,22 +1317,73 @@ class MessageHandler:
             return None
     
     async def _run_chart_cleanup(self):
-        """Run periodic chart cleanup"""
+        """Run aggressive chart cleanup for memory optimization"""
         while True:
             try:
-                await asyncio.sleep(3600)  # Run every hour
-                # Cleanup logic here
+                await asyncio.sleep(600)  # Every 10 minutes (reduced from 1 hour)
+                current_time = datetime.now()
+                
+                # Clean charts older than 30 minutes
+                expired_charts = [
+                    chart_id for chart_id, data in self.user_charts.items()
+                    if current_time - data.get('timestamp', current_time) > timedelta(minutes=30)
+                ]
+                
+                for chart_id in expired_charts:
+                    self.user_charts.pop(chart_id, None)
+                
+                if expired_charts:
+                    logging.info(f"Cleaned up {len(expired_charts)} expired charts")
+                    
             except Exception as e:
                 logging.error(f"Error in chart cleanup: {str(e)}")
     
     async def _run_file_cleanup(self):
-        """Run periodic file cleanup"""
+        """Run aggressive file cleanup for memory optimization"""
         while True:
             try:
-                await asyncio.sleep(7200)  # Run every 2 hours
-                # Cleanup logic here
+                await asyncio.sleep(900)  # Every 15 minutes (reduced from 2 hours)
+                self._cleanup_old_user_files()
             except Exception as e:
                 logging.error(f"Error in file cleanup: {str(e)}")
+    
+    def _cleanup_old_user_files(self):
+        """Clean up old user data files to prevent memory bloat"""
+        current_time = datetime.now()
+        
+        # Remove files older than 1 hour
+        expired_users = [
+            user_id for user_id, file_info in self.user_data_files.items()
+            if current_time - file_info['timestamp'] > timedelta(hours=1)
+        ]
+        
+        for user_id in expired_users:
+            file_info = self.user_data_files.pop(user_id, None)
+            if file_info and os.path.exists(file_info['file_path']):
+                try:
+                    os.remove(file_info['file_path'])
+                except Exception as e:
+                    logging.error(f"Error removing file: {e}")
+        
+        # Limit total number of cached files
+        if len(self.user_data_files) > self.max_user_files:
+            # Remove oldest files
+            sorted_files = sorted(
+                self.user_data_files.items(), 
+                key=lambda x: x[1]['timestamp']
+            )
+            
+            files_to_remove = len(self.user_data_files) - self.max_user_files
+            for user_id, file_info in sorted_files[:files_to_remove]:
+                self.user_data_files.pop(user_id, None)
+                if os.path.exists(file_info['file_path']):
+                    try:
+                        os.remove(file_info['file_path'])
+                    except Exception as e:
+                        logging.error(f"Error removing file: {e}")
+        
+        if expired_users:
+            logging.info(f"Cleaned up {len(expired_users)} expired user files")
     
     def _count_tokens(self, messages: List[Dict[str, Any]]) -> int:
         """

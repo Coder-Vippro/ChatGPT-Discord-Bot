@@ -1,10 +1,18 @@
 import requests
 import json
 import re
+import logging
 from bs4 import BeautifulSoup
 from typing import Dict, List, Any, Optional, Tuple
 from src.config.config import GOOGLE_API_KEY, GOOGLE_CX
 import tiktoken  # Add tiktoken for token counting
+
+# Global tiktoken encoder - initialized once to avoid blocking
+try:
+    TIKTOKEN_ENCODER = tiktoken.get_encoding("o200k_base")
+except Exception as e:
+    logging.error(f"Failed to initialize tiktoken encoder: {e}")
+    TIKTOKEN_ENCODER = None
 
 def google_custom_search(query: str, num_results: int = 5, max_tokens: int = 4000) -> dict:
     """
@@ -83,10 +91,8 @@ def scrape_multiple_links(urls: List[str], max_tokens: int = 4000) -> Tuple[str,
     total_tokens = 0
     used_urls = []
     
-    try:
-        encoding = tiktoken.get_encoding("cl100k_base")
-    except:
-        encoding = None
+    # Use global encoder directly (no async needed since it's pre-initialized)
+    encoding = TIKTOKEN_ENCODER
     
     for url in urls:
         # Skip empty URLs
@@ -183,10 +189,11 @@ def scrape_web_content_with_count(url: str, max_tokens: int = 4000, return_token
         # Count tokens
         token_count = 0
         try:
-            # Use cl100k_base encoder which is used by most recent models
-            encoding = tiktoken.get_encoding("cl100k_base")
-            tokens = encoding.encode(text)
-            token_count = len(tokens)
+            # Use global o200k_base encoder
+            encoding = TIKTOKEN_ENCODER
+            if encoding:
+                tokens = encoding.encode(text)
+                token_count = len(tokens)
             
             # Truncate if token count exceeds max_tokens and we're not returning token count
             if len(tokens) > max_tokens and not return_token_count:

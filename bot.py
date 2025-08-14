@@ -166,8 +166,8 @@ async def main():
         bot = commands.Bot(
             command_prefix="//quocanhvu", 
             intents=intents, 
-            heartbeat_timeout=120,
-            max_messages=10000  # Cache more messages to improve experience
+            heartbeat_timeout=180
+            # Removed max_messages to reduce RAM usage
         )
         
         # Initialize database handler
