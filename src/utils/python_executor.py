@@ -156,7 +156,7 @@ async def execute_python_code(args: Dict[str, Any]) -> Dict[str, Any]:
         args: Dictionary containing:
             - code: The Python code to execute
             - input: Optional input data for the code
-            - install_packages: Optional list of packages to install
+            - install_packages: List of packages to install before execution
             - timeout: Optional timeout in seconds (default: 30)
             
     Returns:
@@ -175,11 +175,20 @@ async def execute_python_code(args: Dict[str, Any]) -> Dict[str, Any]:
                 "output": ""
             }
         
-        # Install packages if requested
+        # Install requested packages first
+        installed_packages = []
         if packages_to_install:
+            logger.info(f"Installing requested packages: {packages_to_install}")
             install_result = await install_packages(packages_to_install)
-            if not install_result["success"]:
-                logger.warning(f"Package installation issues: {install_result}")
+            
+            if install_result["installed"]:
+                installed_packages = install_result["installed"]
+                logger.info(f"Successfully installed: {installed_packages}")
+            
+            if install_result["failed"]:
+                failed_packages = [f["package"] for f in install_result["failed"]]
+                logger.warning(f"Failed to install: {failed_packages}")
+                # Continue execution even if some packages failed to install
         
         # Sanitize the code
         is_safe, sanitized_code = sanitize_python_code(code)
@@ -196,6 +205,14 @@ async def execute_python_code(args: Dict[str, Any]) -> Dict[str, Any]:
         
         # Execute code in controlled environment
         result = await execute_code_safely(sanitized_code, input_data, timeout)
+        
+        # Add information about installed packages to the result
+        if installed_packages:
+            result["installed_packages"] = installed_packages
+            # Prepend package installation info to output
+            if result.get("success"):
+                package_info = f"[Installed packages: {', '.join(installed_packages)}]\n\n"
+                result["output"] = package_info + result.get("output", "")
         
         return result
         
@@ -336,6 +353,22 @@ async def execute_code_safely(code: str, input_data: str, timeout: int) -> Dict[
                 "error": f"Code execution timed out after {timeout} seconds",
                 "output": stdout_capture.getvalue(),
                 "stderr": stderr_capture.getvalue()
+            }
+        except Exception as e:
+            # Capture execution errors with helpful information
+            error_msg = str(e)
+            stderr_content = stderr_capture.getvalue()
+            
+            # If it's an import error, provide helpful guidance
+            if "ModuleNotFoundError" in error_msg or "ImportError" in error_msg:
+                error_msg += "\n\nHint: If you need additional packages, specify them in the 'install_packages' parameter."
+            
+            return {
+                "success": False,
+                "error": f"Execution error: {error_msg}",
+                "output": stdout_capture.getvalue(),
+                "stderr": stderr_content + f"\nExecution error: {error_msg}",
+                "traceback": traceback.format_exc()
             }
         
         # Restore stdout and stderr

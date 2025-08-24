@@ -184,13 +184,17 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": "Execute Python code. MUST use print() for output.",
+                "description": "Execute Python code with package installation support. If you need specific packages, list them in 'install_packages' parameter. The system will install them before running your code. MUST use print() for output.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "code": {"type": "string", "description": "Python code with print() statements"},
                         "input_data": {"type": "string", "description": "Optional input data"},
-                        "install_packages": {"type": "array", "items": {"type": "string"}},
+                        "install_packages": {
+                            "type": "array", 
+                            "items": {"type": "string"}, 
+                            "description": "List of pip package names to install before running code (e.g., ['requests', 'beautifulsoup4', 'opencv-python'])"
+                        },
                         "enable_visualization": {"type": "boolean", "description": "For charts/graphs"},
                         "timeout": {"type": "integer", "default": 30, "minimum": 1, "maximum": 240}
                     },

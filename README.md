@@ -9,6 +9,9 @@ Welcome to **ChatGPT Discord Bot**! This bot provides a powerful AI assistant fo
 - **Image Generation**: Creates custom images from text prompts using Runware's API
 - **Data Analysis**: Analyzes CSV and Excel files with visualizations (distributions, correlations, box plots, etc.)
 - **Code Interpretation**: Executes Python code for calculations and data processing
+  - **Package Installation**: Automatically installs required Python packages for code execution
+  - **Code Display**: Shows executed code, input, and output in Discord chat for transparency
+  - **Secure Sandbox**: Runs code in a controlled environment with safety restrictions
 - **Reminder System**: Sets timed reminders with custom timezone support
 - **Web Tools**:
   - **Google Search**: Searches the web and provides relevant information
