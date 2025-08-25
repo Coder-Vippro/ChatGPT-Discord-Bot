@@ -439,7 +439,7 @@ async def call_openai_api(client, messages, model, temperature=0.7, max_tokens=N
             "messages": messages,
             "max_tokens": max_tokens,
             "tools": tools,
-            "tool_choice": "auto" if tools else None
+            "tool_choice": "required" if tools else None  # Force tool usage when available
         }
         
         # Add temperature only for models that support it (exclude GPT-5 family)

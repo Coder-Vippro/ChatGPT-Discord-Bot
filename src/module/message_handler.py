@@ -1146,6 +1146,7 @@ class MessageHandler:
             # Add tools if using a supported model
             if use_tools:
                 api_params["tools"] = get_tools_for_model()
+                api_params["tool_choice"] = "required"  # Force the model to use tools when available
             
             # Initialize variables to track tool responses
             image_generation_used = False
@@ -1346,20 +1347,175 @@ class MessageHandler:
 
     # Tool implementation methods
     async def _google_search(self, args: Dict[str, Any]):
-        """Perform a Google search"""
+        """Perform a Google search with Discord display"""
         try:
+            # Get the Discord message to display search activity
+            discord_message = self._get_discord_message_from_current_task()
+            
+            # Extract search parameters
+            query = args.get('query', '')
+            num_results = args.get('num_results', 3)
+            
+            # Import and call Google search
             from src.utils.web_utils import google_search
             result = await google_search(args)
+            
+            # Display the search activity in Discord
+            if discord_message and query:
+                try:
+                    # Parse the result to get structured data
+                    import json
+                    search_data = json.loads(result) if isinstance(result, str) else result
+                    
+                    # Get the combined content
+                    combined_content = search_data.get('combined_content', '')
+                    
+                    # Check if content is too long for Discord message (3000 chars limit)
+                    if len(combined_content) > 3000:
+                        # Send content as file attachment
+                        content_file = discord.File(
+                            io.StringIO(combined_content), 
+                            filename="search_results.txt"
+                        )
+                        
+                        # Create display text without full content
+                        search_display = "**🔍 Google Search**\n\n"
+                        search_display += f"**📝 Query:** `{query}`\n"
+                        search_display += f"**📊 Results:** {num_results} requested\n\n"
+                        
+                        # Show search results with links
+                        if 'results' in search_data and search_data['results']:
+                            search_display += "**🔗 Found Links:**\n"
+                            for i, item in enumerate(search_data['results'][:5], 1):
+                                title = item.get('title', 'No title')[:80]
+                                link = item.get('link', '')
+                                used_mark = "✅" if item.get('used_for_content', False) else "📄"
+                                search_display += f"{i}. {used_mark} [{title}]({link})\n"
+                            search_display += "\n"
+                        
+                        search_display += "**📄 Content:** *Attached as file (too long to display)*"
+                        
+                        if 'error' in search_data:
+                            search_display += f"\n**❌ Error:** {search_data['error'][:300]}"
+                        
+                        # Send with file attachment
+                        await discord_message.channel.send(search_display, file=content_file)
+                    else:
+                        # Use normal display for shorter content
+                        search_display = "**🔍 Google Search**\n\n"
+                        search_display += f"**📝 Query:** `{query}`\n"
+                        search_display += f"**📊 Results:** {num_results} requested\n\n"
+                        
+                        # Show search results with links
+                        if 'results' in search_data and search_data['results']:
+                            search_display += "**🔗 Found Links:**\n"
+                            for i, item in enumerate(search_data['results'][:5], 1):
+                                title = item.get('title', 'No title')[:80]
+                                link = item.get('link', '')
+                                used_mark = "✅" if item.get('used_for_content', False) else "📄"
+                                search_display += f"{i}. {used_mark} [{title}]({link})\n"
+                            search_display += "\n"
+                        
+                        # Show content preview
+                        if combined_content.strip():
+                            search_display += "**📄 Content:**\n```\n"
+                            search_display += combined_content
+                            search_display += "\n```"
+                        else:
+                            search_display += "**📄 Content:** *(No content retrieved)*"
+                        
+                        if 'error' in search_data:
+                            search_display += f"\n**❌ Error:** {search_data['error']}"
+                        
+                        # Send the search display to Discord
+                        await discord_message.channel.send(search_display)
+                        
+                except Exception as e:
+                    logging.error(f"Error displaying Google search: {str(e)}")
+                    # Fallback: just send a simple message to prevent bot from getting stuck
+                    try:
+                        await discord_message.channel.send(f"🔍 Google search completed for: `{query}`")
+                    except:
+                        pass
+            
             return result
         except Exception as e:
             logging.error(f"Error in Google search: {str(e)}")
             return json.dumps({"error": f"Google search failed: {str(e)}"})
     
     async def _scrape_webpage(self, args: Dict[str, Any]):
-        """Scrape a webpage"""
+        """Scrape a webpage with Discord display"""
         try:
+            # Get the Discord message to display scraping activity
+            discord_message = self._get_discord_message_from_current_task()
+            
+            # Extract scraping parameters
+            url = args.get('url', '')
+            max_tokens = args.get('max_tokens', 4000)
+            
+            # Import and call webpage scraper
             from src.utils.web_utils import scrape_webpage
             result = await scrape_webpage(args)
+            
+            # Display the scraping activity in Discord
+            if discord_message and url:
+                try:
+                    # Parse the result to get structured data
+                    import json
+                    scrape_data = json.loads(result) if isinstance(result, str) else result
+                    
+                    # Get the scraped content
+                    content = scrape_data.get('content', '') if scrape_data.get('success') else ''
+                    
+                    # Check if content is too long for Discord message (3000 chars limit)
+                    if len(content) > 3000:
+                        # Send content as file attachment
+                        content_file = discord.File(
+                            io.StringIO(content), 
+                            filename="scraped_content.txt"
+                        )
+                        
+                        # Create display text without full content
+                        scrape_display = "**🌐 Webpage Scraping**\n\n"
+                        scrape_display += f"**🔗 URL:** {url}\n"
+                        scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
+                        scrape_display += "**📄 Content:** *Attached as file (too long to display)*"
+                        
+                        if 'error' in scrape_data:
+                            scrape_display += f"\n**❌ Error:** {scrape_data['error'][:300]}"
+                        elif content:
+                            scrape_display += f"\n**✅ Success:** Scraped {len(content)} characters"
+                        
+                        # Send with file attachment
+                        await discord_message.channel.send(scrape_display, file=content_file)
+                    else:
+                        # Use normal display for shorter content
+                        scrape_display = "**🌐 Webpage Scraping**\n\n"
+                        scrape_display += f"**🔗 URL:** {url}\n"
+                        scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
+                        
+                        # Show content
+                        if content.strip():
+                            scrape_display += "**📄 Content:**\n```\n"
+                            scrape_display += content
+                            scrape_display += "\n```"
+                        else:
+                            scrape_display += "**📄 Content:** *(No content retrieved)*"
+                        
+                        if 'error' in scrape_data:
+                            scrape_display += f"\n**❌ Error:** {scrape_data['error']}"
+                        
+                        # Send the scraping display to Discord
+                        await discord_message.channel.send(scrape_display)
+                        
+                except Exception as e:
+                    logging.error(f"Error displaying webpage scraping: {str(e)}")
+                    # Fallback: just send a simple message to prevent bot from getting stuck
+                    try:
+                        await discord_message.channel.send(f"🌐 Webpage scraping completed for: {url}")
+                    except:
+                        pass
+            
             return result
         except Exception as e:
             logging.error(f"Error in webpage scraping: {str(e)}")
