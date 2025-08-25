@@ -242,23 +242,6 @@ class MessageHandler:
             # Display the executed code information in Discord (but not save to history)
             if discord_message and code_to_execute:
                 try:
-                    # Create a formatted code execution display as a separate message
-                    execution_display = "**🐍 Python Code Execution**\n\n"
-                    
-                    # Show packages to install if any
-                    if packages_to_install:
-                        execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
-                    
-                    # Show input data if any
-                    if input_data:
-                        execution_display += "**📥 Input:**\n```\n"
-                        execution_display += input_data[:500]  # Limit input length
-                        if len(input_data) > 500:
-                            execution_display += "\n... (input truncated)"
-                        execution_display += "\n```\n\n"
-                    
-                    # Show the actual code
-                    execution_display += "**💻 Code:**\n```python\n"
                     # Clean up the code display (remove file context comments)
                     code_lines = code_to_execute.split('\n')
                     clean_code_lines = []
@@ -269,35 +252,101 @@ class MessageHandler:
                             clean_code_lines.append(line)
                     
                     clean_code = '\n'.join(clean_code_lines).strip()
-                    execution_display += clean_code[:1000]  # Limit code length for Discord
-                    if len(clean_code) > 1000:
-                        execution_display += "\n... (code truncated)"
-                    execution_display += "\n```\n\n"
                     
-                    # Show the output
-                    if execute_result and execute_result.get("success"):
-                        output = execute_result.get("output", "")
-                        # Remove package installation info from output if it exists
-                        if output and "Installed packages:" in output:
-                            lines = output.split('\n')
-                            output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                    # Check if code is too long for Discord message (3000 chars limit)
+                    if len(clean_code) > 3000:
+                        # Send code as file attachment
+                        code_file = discord.File(
+                            io.StringIO(clean_code), 
+                            filename="executed_code.py"
+                        )
                         
-                        if output and output.strip():
-                            execution_display += "**📤 Output:**\n```\n"
-                            execution_display += output[:1000]  # Limit output length for Discord
-                            if len(output) > 1000:
-                                execution_display += "\n... (output truncated)"
-                            execution_display += "\n```"
+                        # Create display text without code
+                        execution_display = "**🐍 Python Code Execution**\n\n"
+                        
+                        # Show packages to install if any
+                        if packages_to_install:
+                            execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
+                        
+                        # Show input data if any
+                        if input_data:
+                            execution_display += "**📥 Input:**\n```\n"
+                            execution_display += input_data[:500]  # Limit input length
+                            if len(input_data) > 500:
+                                execution_display += "\n... (input truncated)"
+                            execution_display += "\n```\n\n"
+                        
+                        execution_display += "**💻 Code:** *Attached as file (too long to display)*\n\n"
+                        
+                        # Show the output
+                        if execute_result and execute_result.get("success"):
+                            output = execute_result.get("output", "")
+                            # Remove package installation info from output if it exists
+                            if output and "Installed packages:" in output:
+                                lines = output.split('\n')
+                                output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                            
+                            if output and output.strip():
+                                execution_display += "**📤 Output:**\n```\n"
+                                execution_display += output[:2000]  # More space for output when code is attached
+                                if len(output) > 2000:
+                                    execution_display += "\n... (output truncated)"
+                                execution_display += "\n```"
+                            else:
+                                execution_display += "**📤 Output:** *(No output)*"
                         else:
-                            execution_display += "**📤 Output:** *(No output)*"
+                            error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
+                            execution_display += f"**❌ Error:**\n```\n{error_msg[:1000]}\n```"
+                            if len(error_msg) > 1000:
+                                execution_display += "*(Error message truncated)*"
+                        
+                        # Send with file attachment
+                        await discord_message.channel.send(execution_display, file=code_file)
                     else:
-                        error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
-                        execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
-                        if len(error_msg) > 800:
-                            execution_display += "*(Error message truncated)*"
-                    
-                    # Send the execution display to Discord as a separate message
-                    await discord_message.channel.send(execution_display)
+                        # Use normal display for shorter code
+                        execution_display = "**🐍 Python Code Execution**\n\n"
+                        
+                        # Show packages to install if any
+                        if packages_to_install:
+                            execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
+                        
+                        # Show input data if any
+                        if input_data:
+                            execution_display += "**📥 Input:**\n```\n"
+                            execution_display += input_data[:500]  # Limit input length
+                            if len(input_data) > 500:
+                                execution_display += "\n... (input truncated)"
+                            execution_display += "\n```\n\n"
+                        
+                        # Show the actual code
+                        execution_display += "**💻 Code:**\n```python\n"
+                        execution_display += clean_code
+                        execution_display += "\n```\n\n"
+                        
+                        # Show the output
+                        if execute_result and execute_result.get("success"):
+                            output = execute_result.get("output", "")
+                            # Remove package installation info from output if it exists
+                            if output and "Installed packages:" in output:
+                                lines = output.split('\n')
+                                output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                            
+                            if output and output.strip():
+                                execution_display += "**📤 Output:**\n```\n"
+                                execution_display += output[:1000]  # Limit output length for Discord
+                                if len(output) > 1000:
+                                    execution_display += "\n... (output truncated)"
+                                execution_display += "\n```"
+                            else:
+                                execution_display += "**📤 Output:** *(No output)*"
+                        else:
+                            error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
+                            execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
+                            if len(error_msg) > 800:
+                                execution_display += "*(Error message truncated)*"
+                        
+                        # Send the execution display to Discord as a separate message
+                        await discord_message.channel.send(execution_display)
                     
                 except Exception as e:
                     logging.error(f"Error displaying code execution: {str(e)}")
@@ -393,50 +442,96 @@ class MessageHandler:
             # Display the generated code if available
             if discord_message and result and result.get("generated_code"):
                 try:
-                    # Create a formatted code execution display as a separate message
-                    execution_display = "**� Data Analysis Execution**\n\n"
-                    
-                    # Show the file being analyzed
-                    file_path = args.get("file_path", "")
-                    if file_path:
-                        filename = os.path.basename(file_path)
-                        execution_display += f"**📁 Analyzing file:** `{filename}`\n\n"
-                    
-                    # Show the analysis type if specified
-                    analysis_type = args.get("analysis_type", "")
-                    custom_analysis = args.get("custom_analysis", "")
-                    if analysis_type:
-                        execution_display += f"**🔍 Analysis type:** {analysis_type}\n\n"
-                    if custom_analysis:
-                        execution_display += f"**📝 Custom request:** {custom_analysis}\n\n"
-                    
-                    # Show the generated code
-                    execution_display += "**💻 Generated Code:**\n```python\n"
                     generated_code = result["generated_code"]
-                    execution_display += generated_code[:1000]  # Limit code length for Discord
-                    if len(generated_code) > 1000:
-                        execution_display += "\n... (code truncated)"
-                    execution_display += "\n```\n\n"
                     
-                    # Show the output
-                    if result.get("success"):
-                        output = result.get("output", "")
-                        if output and output.strip():
-                            execution_display += "**📊 Analysis Results:**\n```\n"
-                            execution_display += output[:1000]  # Limit output length for Discord
-                            if len(output) > 1000:
-                                execution_display += "\n... (output truncated)"
-                            execution_display += "\n```"
+                    # Check if code is too long for Discord message (3000 chars limit)
+                    if len(generated_code) > 3000:
+                        # Send code as file attachment
+                        code_file = discord.File(
+                            io.StringIO(generated_code), 
+                            filename="data_analysis_code.py"
+                        )
+                        
+                        # Create display text without code
+                        execution_display = "**📊 Data Analysis Execution**\n\n"
+                        
+                        # Show the file being analyzed
+                        file_path = args.get("file_path", "")
+                        if file_path:
+                            filename = os.path.basename(file_path)
+                            execution_display += f"**📁 Analyzing file:** `{filename}`\n\n"
+                        
+                        # Show the analysis type if specified
+                        analysis_type = args.get("analysis_type", "")
+                        custom_analysis = args.get("custom_analysis", "")
+                        if analysis_type:
+                            execution_display += f"**🔍 Analysis type:** {analysis_type}\n\n"
+                        if custom_analysis:
+                            execution_display += f"**📝 Custom request:** {custom_analysis}\n\n"
+                        
+                        execution_display += "**💻 Generated Code:** *Attached as file (too long to display)*\n\n"
+                        
+                        # Show the output
+                        if result.get("success"):
+                            output = result.get("output", "")
+                            if output and output.strip():
+                                execution_display += "**� Analysis Results:**\n```\n"
+                                execution_display += output[:2000]  # More space for output when code is attached
+                                if len(output) > 2000:
+                                    execution_display += "\n... (output truncated)"
+                                execution_display += "\n```"
+                            else:
+                                execution_display += "**📊 Analysis Results:** *(No text output - check for visualizations below)*"
                         else:
-                            execution_display += "**📊 Analysis Results:** *(No text output - check for visualizations below)*"
+                            error_msg = result.get("error", "Unknown error")
+                            execution_display += f"**❌ Error:**\n```\n{error_msg[:1000]}\n```"
+                            if len(error_msg) > 1000:
+                                execution_display += "*(Error message truncated)*"
+                        
+                        # Send with file attachment
+                        await discord_message.channel.send(execution_display, file=code_file)
                     else:
-                        error_msg = result.get("error", "Unknown error")
-                        execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
-                        if len(error_msg) > 800:
-                            execution_display += "*(Error message truncated)*"
-                    
-                    # Send the execution display to Discord as a separate message
-                    await discord_message.channel.send(execution_display)
+                        # Use normal display for shorter code
+                        execution_display = "**📊 Data Analysis Execution**\n\n"
+                        
+                        # Show the file being analyzed
+                        file_path = args.get("file_path", "")
+                        if file_path:
+                            filename = os.path.basename(file_path)
+                            execution_display += f"**📁 Analyzing file:** `{filename}`\n\n"
+                        
+                        # Show the analysis type if specified
+                        analysis_type = args.get("analysis_type", "")
+                        custom_analysis = args.get("custom_analysis", "")
+                        if analysis_type:
+                            execution_display += f"**🔍 Analysis type:** {analysis_type}\n\n"
+                        if custom_analysis:
+                            execution_display += f"**📝 Custom request:** {custom_analysis}\n\n"
+                        
+                        # Show the generated code
+                        execution_display += "**💻 Generated Code:**\n```python\n"
+                        execution_display += generated_code
+                        execution_display += "\n```\n\n"
+                        
+                        # Show the output
+                        if result.get("success"):
+                            output = result.get("output", "")
+                            if output and output.strip():
+                                execution_display += "**📊 Analysis Results:**\n```\n"
+                                execution_display += output[:1000]  # Limit output length for Discord
+                                if len(output) > 1000:
+                                    execution_display += "\n... (output truncated)"
+                                execution_display += "\n```"
+                            else:
+                                execution_display += "**📊 Analysis Results:** *(No text output - check for visualizations below)*"
+                        else:
+                            error_msg = result.get("error", "Unknown error")
+                            execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
+                            if len(error_msg) > 800:
+                                execution_display += "*(Error message truncated)*"
+                        
+                        # Send the execution display to Discord as a separate message
+                        await discord_message.channel.send(execution_display)
                     
                 except Exception as e:
                     logging.error(f"Error displaying data analysis code: {str(e)}")
