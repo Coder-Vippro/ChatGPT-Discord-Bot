@@ -54,30 +54,10 @@ def setup_logging():
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(log_formatter)
         
-        # File handler with rotation (keep 5 files of 5MB each)
-        try:
-            from logging.handlers import RotatingFileHandler
-            os.makedirs('logs', exist_ok=True)
-            file_handler = RotatingFileHandler(
-                'logs/discord_bot.log', 
-                maxBytes=5*1024*1024,  # 5MB
-                backupCount=5
-            )
-            file_handler.setFormatter(log_formatter)
-            
-            # Configure root logger
-            root_logger = logging.getLogger()
-            root_logger.setLevel(logging.INFO)
-            root_logger.addHandler(console_handler)
-            root_logger.addHandler(file_handler)
-        except Exception as e:
-            # Fall back to basic logging if file logging fails
-            logging.basicConfig(
-                level=logging.INFO, 
-                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                stream=sys.stdout
-            )
-            logging.warning(f"Could not set up file logging: {str(e)}")
+        # Configure root logger with console only
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        root_logger.addHandler(console_handler)
 
     # Set up webhook logging if enabled
     if ENABLE_WEBHOOK_LOGGING and LOGGING_WEBHOOK_URL:

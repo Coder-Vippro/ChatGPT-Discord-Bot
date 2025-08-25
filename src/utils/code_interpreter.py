@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import time
 import uuid
-from logging.handlers import RotatingFileHandler
 import traceback
 import contextlib
 from typing import Dict, Any, Optional, List
@@ -17,15 +16,13 @@ from typing import Dict, Any, Optional, List
 from .python_executor import execute_python_code
 from .data_analyzer import analyze_data_file
 
-# Configure logging
-log_file = 'logs/code_interpreter.log'
-os.makedirs(os.path.dirname(log_file), exist_ok=True)
+# Configure logging - console only
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-file_handler = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5)
-file_handler.setFormatter(formatter)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
 logger = logging.getLogger('code_interpreter')
 logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 async def execute_code(args: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -36,7 +36,6 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 # Copy application source code
 COPY bot.py .
 COPY src/ ./src/
-COPY logs/ ./logs/
 
 # Run application
 CMD ["python3", "bot.py"]

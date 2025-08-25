@@ -13,9 +13,8 @@ DATA_FILES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os
 # Create the directory if it doesn't exist
 os.makedirs(DATA_FILES_DIR, exist_ok=True)
 
-# Configure logging
+# Configure logging - console only
 logging.basicConfig(
-    filename='logs/code_execution.log',
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
@@ -174,18 +173,15 @@ def init_data_directory() -> None:
     # Ensure data directory exists
     os.makedirs(DATA_FILES_DIR, exist_ok=True)
     
-    # Set up logging specifically for data operations
-    data_log_file = 'logs/code_execution.log'
-    os.makedirs(os.path.dirname(data_log_file), exist_ok=True)
-    
-    file_handler = logging.FileHandler(data_log_file)
-    file_handler.setFormatter(
+    # Set up logging specifically for data operations - console only
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(
         logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     )
     
     logger = logging.getLogger('code_utils')
     logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     
     # Log directory initialization
     logger.info(f"Initialized data directory at {DATA_FILES_DIR}")

@@ -12,3 +12,4 @@ venv
 temp_charts
 .idea
 temp_data_files
+logs/
