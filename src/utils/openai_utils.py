@@ -184,19 +184,19 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": "Execute Python code with package installation support. If you need specific packages, list them in 'install_packages' parameter. The system will install them before running your code. MUST use print() for output.",
+                "description": "Execute Python code with automatic package installation. IMPORTANT: If your code imports any library (pandas, numpy, requests, matplotlib, etc.), you MUST include it in 'install_packages' parameter or the code will fail. Always use print() statements to show output. Examples of packages: numpy, pandas, matplotlib, seaborn, requests, beautifulsoup4, opencv-python, scikit-learn, plotly, etc.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code": {"type": "string", "description": "Python code with print() statements"},
+                        "code": {"type": "string", "description": "Python code with print() statements for output"},
                         "input_data": {"type": "string", "description": "Optional input data"},
                         "install_packages": {
                             "type": "array", 
                             "items": {"type": "string"}, 
-                            "description": "List of pip package names to install before running code (e.g., ['requests', 'beautifulsoup4', 'opencv-python'])"
+                            "description": "REQUIRED: List ALL pip packages your code imports. Examples: ['pandas'] for pd.read_csv(), ['matplotlib'] for plt.plot(), ['requests'] for HTTP requests, ['numpy'] for arrays, ['beautifulsoup4'] for HTML parsing, etc. If you use ANY import statements, add the package here!"
                         },
                         "enable_visualization": {"type": "boolean", "description": "For charts/graphs"},
-                        "timeout": {"type": "integer", "default": 30, "minimum": 1, "maximum": 240}
+                        "timeout": {"type": "integer", "default": 60, "minimum": 1, "maximum": 300, "description": "Execution timeout in seconds (default 60, max 300)"}
                     },
                     "required": ["code"]
                 }

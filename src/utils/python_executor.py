@@ -6,6 +6,7 @@ This module provides a completely secure isolated execution environment.
 import os
 import sys
 import subprocess
+import asyncio
 import tempfile
 import venv
 import shutil
@@ -189,9 +190,9 @@ class SecureExecutor:
         # For unknown packages, be restrictive
         return False, f"Package '{package}' is not in the approved safe list"
     
-    def install_packages_clean(self, packages: List[str], pip_path: str) -> Tuple[List[str], List[str]]:
+    async def install_packages_clean(self, packages: List[str], pip_path: str) -> Tuple[List[str], List[str]]:
         """
-        Install packages in the clean virtual environment.
+        Install packages in the clean virtual environment (async to prevent blocking).
         
         Args:
             packages: List of package names to install
@@ -211,31 +212,40 @@ class SecureExecutor:
                 continue
             
             try:
-                # Install package in the clean virtual environment
-                result = subprocess.run(
-                    [pip_path, "install", package],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,  # 2 minutes per package
-                    check=False,
-                    cwd=self.temp_dir  # Run from temp directory
+                # Install package in the clean virtual environment using async subprocess
+                process = await asyncio.create_subprocess_exec(
+                    pip_path, "install", package,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=self.temp_dir
                 )
                 
-                if result.returncode == 0:
-                    installed.append(package)
-                else:
+                try:
+                    stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+                    return_code = process.returncode
+                    
+                    if return_code == 0:
+                        installed.append(package)
+                    else:
+                        failed.append(package)
+                        
+                except asyncio.TimeoutError:
+                    # Kill the process if it times out
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except:
+                        pass
                     failed.append(package)
                     
-            except subprocess.TimeoutExpired:
-                failed.append(package)
             except Exception as e:
                 failed.append(package)
         
         return installed, failed
     
-    def execute_code_secure(self, code: str, python_path: str, timeout: int) -> Dict[str, Any]:
+    async def execute_code_secure(self, code: str, python_path: str, timeout: int) -> Dict[str, Any]:
         """
-        Execute Python code in the completely isolated environment.
+        Execute Python code in the completely isolated environment (async to prevent blocking).
         
         Args:
             code: Python code to execute
@@ -254,14 +264,12 @@ class SecureExecutor:
             with open(code_file, 'w', encoding='utf-8') as f:
                 f.write(code)
             
-            # Execute code in completely isolated environment
-            result = subprocess.run(
-                [python_path, code_file],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-                cwd=self.temp_dir,  # Run from isolated directory
+            # Execute code in completely isolated environment using async subprocess
+            process = await asyncio.create_subprocess_exec(
+                python_path, code_file,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=self.temp_dir,
                 env={  # Minimal environment variables
                     'PATH': os.path.dirname(python_path),
                     'PYTHONPATH': '',
@@ -269,41 +277,54 @@ class SecureExecutor:
                 }
             )
             
-            execution_time = time.time() - start_time
-            
-            # Process results
-            output = result.stdout
-            error_output = result.stderr
-            
-            # Truncate output if too large
-            if len(output) > MAX_OUTPUT_SIZE:
-                output = output[:MAX_OUTPUT_SIZE] + "\n... (output truncated)"
-            
-            if result.returncode == 0:
-                return {
-                    "success": True,
-                    "output": output,
-                    "error": error_output if error_output else "",
-                    "execution_time": execution_time,
-                    "return_code": result.returncode
-                }
-            else:
+            try:
+                # Wait for process completion with timeout
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                return_code = process.returncode
+                
+                execution_time = time.time() - start_time
+                
+                # Process results
+                output = stdout.decode('utf-8') if stdout else ""
+                error_output = stderr.decode('utf-8') if stderr else ""
+                
+                # Truncate output if too large
+                if len(output) > MAX_OUTPUT_SIZE:
+                    output = output[:MAX_OUTPUT_SIZE] + "\n... (output truncated)"
+                
+                if return_code == 0:
+                    return {
+                        "success": True,
+                        "output": output,
+                        "error": error_output if error_output else "",
+                        "execution_time": execution_time,
+                        "return_code": return_code
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "output": output,
+                        "error": error_output,
+                        "execution_time": execution_time,
+                        "return_code": return_code
+                    }
+                    
+            except asyncio.TimeoutError:
+                # Kill the process if it times out
+                try:
+                    process.kill()
+                    await process.wait()
+                except:
+                    pass
+                    
                 return {
                     "success": False,
-                    "output": output,
-                    "error": error_output,
-                    "execution_time": execution_time,
-                    "return_code": result.returncode
+                    "output": "",
+                    "error": f"Code execution timed out after {timeout} seconds",
+                    "execution_time": timeout,
+                    "return_code": -1
                 }
                 
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "output": "",
-                "error": f"Code execution timed out after {timeout} seconds",
-                "execution_time": timeout,
-                "return_code": -1
-            }
         except Exception as e:
             execution_time = time.time() - start_time
             error_msg = f"Execution error: {str(e)}"
@@ -369,7 +390,7 @@ async def execute_python_code(args: Dict[str, Any]) -> Dict[str, Any]:
             installed_packages = []
             failed_packages = []
             if packages_to_install:
-                installed_packages, failed_packages = executor.install_packages_clean(packages_to_install, pip_path)
+                installed_packages, failed_packages = await executor.install_packages_clean(packages_to_install, pip_path)
             
             # Prepare code with input data if provided
             if input_data:
@@ -379,7 +400,7 @@ async def execute_python_code(args: Dict[str, Any]) -> Dict[str, Any]:
                 code_with_input = code
             
             # Execute code in clean environment
-            result = executor.execute_code_secure(code_with_input, python_path, timeout)
+            result = await executor.execute_code_secure(code_with_input, python_path, timeout)
             
             # Add package installation info
             if installed_packages:
