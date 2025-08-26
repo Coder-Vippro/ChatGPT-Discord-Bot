@@ -376,11 +376,36 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
             "/search `<query>` - Search Google and send results to the AI model.\n"
             "/web `<url>` - Scrape a webpage and send the data to the AI model.\n"
             "/generate `<prompt>` - Generate an image from a text prompt.\n"
+            "/toggle_tools - Toggle display of tool execution details (code, input, output).\n"
             "/reset - Reset your chat history.\n"
             "/user_stat - Get information about your input tokens, output tokens, and current model.\n"
             "/help - Display this help message.\n"
         )
         await interaction.response.send_message(help_message, ephemeral=True)
+
+    @tree.command(name="toggle_tools", description="Toggle the display of tool execution details (code, input, output).")
+    @check_blacklist()
+    async def toggle_tools(interaction: discord.Interaction):
+        """Toggle the display of tool execution details for the user."""
+        await interaction.response.defer(ephemeral=True)
+        
+        user_id = interaction.user.id
+        current_setting = await db_handler.get_user_tool_display(user_id)
+        new_setting = not current_setting
+        
+        await db_handler.set_user_tool_display(user_id, new_setting)
+        
+        status = "enabled" if new_setting else "disabled"
+        description = (
+            "You will now see detailed execution information including code, input, and output when tools are used."
+            if new_setting else
+            "Tool execution details are now hidden. You'll only see the final results."
+        )
+        
+        await interaction.followup.send(
+            f"🔧 **Tool Display {status.title()}**\n{description}",
+            ephemeral=True
+        )
 
     @tree.command(name="stop", description="Stop any process or queue of the user. Admins can stop other users' tasks by providing their ID.")
     @app_commands.describe(user_id="The Discord user ID to stop tasks for (admin only)")

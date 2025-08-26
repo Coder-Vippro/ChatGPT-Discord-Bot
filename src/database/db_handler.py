@@ -112,6 +112,20 @@ class DatabaseHandler:
             upsert=True
         )
     
+    # Tool display preferences
+    async def get_user_tool_display(self, user_id: int) -> bool:
+        """Get user's tool display preference (default: False - disabled)"""
+        user_data = await self.db.user_preferences.find_one({'user_id': user_id})
+        return user_data.get('show_tool_execution', False) if user_data else False
+    
+    async def set_user_tool_display(self, user_id: int, show_tools: bool) -> None:
+        """Set user's tool display preference"""
+        await self.db.user_preferences.update_one(
+            {'user_id': user_id},
+            {'$set': {'show_tool_execution': show_tools}},
+            upsert=True
+        )
+    
     # Admin and permissions management with caching
     async def is_admin(self, user_id: int) -> bool:
         """Check if the user is an admin (no caching for security)"""
@@ -163,6 +177,7 @@ class DatabaseHandler:
         """Create indexes for better query performance"""
         await self.db.user_histories.create_index("user_id")
         await self.db.user_models.create_index("user_id") 
+        await self.db.user_preferences.create_index("user_id")
         await self.db.whitelist.create_index("user_id")
         await self.db.blacklist.create_index("user_id")
         

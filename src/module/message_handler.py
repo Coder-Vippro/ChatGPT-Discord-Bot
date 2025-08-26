@@ -241,115 +241,119 @@ class MessageHandler:
             
             # Display the executed code information in Discord (but not save to history)
             if discord_message and code_to_execute:
-                try:
-                    # Clean up the code display (remove file context comments)
-                    code_lines = code_to_execute.split('\n')
-                    clean_code_lines = []
-                    for line in code_lines:
-                        if not (line.strip().startswith('# Data file available:') or 
-                               line.strip().startswith('# File path:') or 
-                               line.strip().startswith('# You can access this file using:')):
-                            clean_code_lines.append(line)
-                    
-                    clean_code = '\n'.join(clean_code_lines).strip()
-                    
-                    # Check if code is too long for Discord message (3000 chars limit)
-                    if len(clean_code) > 3000:
-                        # Send code as file attachment
-                        code_file = discord.File(
-                            io.StringIO(clean_code), 
-                            filename="executed_code.py"
-                        )
+                # Check user's tool display preference
+                show_execution_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                
+                if show_execution_details:
+                    try:
+                        # Clean up the code display (remove file context comments)
+                        code_lines = code_to_execute.split('\n')
+                        clean_code_lines = []
+                        for line in code_lines:
+                            if not (line.strip().startswith('# Data file available:') or 
+                                   line.strip().startswith('# File path:') or 
+                                   line.strip().startswith('# You can access this file using:')):
+                                clean_code_lines.append(line)
                         
-                        # Create display text without code
-                        execution_display = "**🐍 Python Code Execution**\n\n"
+                        clean_code = '\n'.join(clean_code_lines).strip()
                         
-                        # Show packages to install if any
-                        if packages_to_install:
-                            execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
-                        
-                        # Show input data if any
-                        if input_data:
-                            execution_display += "**📥 Input:**\n```\n"
-                            execution_display += input_data[:500]  # Limit input length
-                            if len(input_data) > 500:
-                                execution_display += "\n... (input truncated)"
-                            execution_display += "\n```\n\n"
-                        
-                        execution_display += "**💻 Code:** *Attached as file (too long to display)*\n\n"
-                        
-                        # Show the output
-                        if execute_result and execute_result.get("success"):
-                            output = execute_result.get("output", "")
-                            # Remove package installation info from output if it exists
-                            if output and "Installed packages:" in output:
-                                lines = output.split('\n')
-                                output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                        # Check if code is too long for Discord message (3000 chars limit)
+                        if len(clean_code) > 3000:
+                            # Send code as file attachment
+                            code_file = discord.File(
+                                io.StringIO(clean_code), 
+                                filename="executed_code.py"
+                            )
                             
-                            if output and output.strip():
-                                execution_display += "**📤 Output:**\n```\n"
-                                execution_display += output[:2000]  # More space for output when code is attached
-                                if len(output) > 2000:
-                                    execution_display += "\n... (output truncated)"
-                                execution_display += "\n```"
-                            else:
-                                execution_display += "**📤 Output:** *(No output)*"
-                        else:
-                            error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
-                            execution_display += f"**❌ Error:**\n```\n{error_msg[:1000]}\n```"
-                            if len(error_msg) > 1000:
-                                execution_display += "*(Error message truncated)*"
-                        
-                        # Send with file attachment
-                        await discord_message.channel.send(execution_display, file=code_file)
-                    else:
-                        # Use normal display for shorter code
-                        execution_display = "**🐍 Python Code Execution**\n\n"
-                        
-                        # Show packages to install if any
-                        if packages_to_install:
-                            execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
-                        
-                        # Show input data if any
-                        if input_data:
-                            execution_display += "**📥 Input:**\n```\n"
-                            execution_display += input_data[:500]  # Limit input length
-                            if len(input_data) > 500:
-                                execution_display += "\n... (input truncated)"
-                            execution_display += "\n```\n\n"
-                        
-                        # Show the actual code
-                        execution_display += "**💻 Code:**\n```python\n"
-                        execution_display += clean_code
-                        execution_display += "\n```\n\n"
-                        
-                        # Show the output
-                        if execute_result and execute_result.get("success"):
-                            output = execute_result.get("output", "")
-                            # Remove package installation info from output if it exists
-                            if output and "Installed packages:" in output:
-                                lines = output.split('\n')
-                                output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                            # Create display text without code
+                            execution_display = "**🐍 Python Code Execution**\n\n"
                             
-                            if output and output.strip():
-                                execution_display += "**📤 Output:**\n```\n"
-                                execution_display += output[:1000]  # Limit output length for Discord
-                                if len(output) > 1000:
-                                    execution_display += "\n... (output truncated)"
-                                execution_display += "\n```"
+                            # Show packages to install if any
+                            if packages_to_install:
+                                execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
+                            
+                            # Show input data if any
+                            if input_data:
+                                execution_display += "**📥 Input:**\n```\n"
+                                execution_display += input_data[:500]  # Limit input length
+                                if len(input_data) > 500:
+                                    execution_display += "\n... (input truncated)"
+                                execution_display += "\n```\n\n"
+                            
+                            execution_display += "**💻 Code:** *Attached as file (too long to display)*\n\n"
+                            
+                            # Show the output
+                            if execute_result and execute_result.get("success"):
+                                output = execute_result.get("output", "")
+                                # Remove package installation info from output if it exists
+                                if output and "Installed packages:" in output:
+                                    lines = output.split('\n')
+                                    output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                                
+                                if output and output.strip():
+                                    execution_display += "**📤 Output:**\n```\n"
+                                    execution_display += output[:2000]  # More space for output when code is attached
+                                    if len(output) > 2000:
+                                        execution_display += "\n... (output truncated)"
+                                    execution_display += "\n```"
+                                else:
+                                    execution_display += "**📤 Output:** *(No output)*"
                             else:
-                                execution_display += "**📤 Output:** *(No output)*"
+                                error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
+                                execution_display += f"**❌ Error:**\n```\n{error_msg[:1000]}\n```"
+                                if len(error_msg) > 1000:
+                                    execution_display += "*(Error message truncated)*"
+                            
+                            # Send with file attachment
+                            await discord_message.channel.send(execution_display, file=code_file)
                         else:
-                            error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
-                            execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
-                            if len(error_msg) > 800:
-                                execution_display += "*(Error message truncated)*"
+                            # Use normal display for shorter code
+                            execution_display = "**🐍 Python Code Execution**\n\n"
+                            
+                            # Show packages to install if any
+                            if packages_to_install:
+                                execution_display += f"**📦 Installing packages:** {', '.join(packages_to_install)}\n\n"
+                            
+                            # Show input data if any
+                            if input_data:
+                                execution_display += "**📥 Input:**\n```\n"
+                                execution_display += input_data[:500]  # Limit input length
+                                if len(input_data) > 500:
+                                    execution_display += "\n... (input truncated)"
+                                execution_display += "\n```\n\n"
+                            
+                            # Show the actual code
+                            execution_display += "**💻 Code:**\n```python\n"
+                            execution_display += clean_code
+                            execution_display += "\n```\n\n"
+                            
+                            # Show the output
+                            if execute_result and execute_result.get("success"):
+                                output = execute_result.get("output", "")
+                                # Remove package installation info from output if it exists
+                                if output and "Installed packages:" in output:
+                                    lines = output.split('\n')
+                                    output = '\n'.join(lines[2:]) if len(lines) > 2 else ""
+                                
+                                if output and output.strip():
+                                    execution_display += "**📤 Output:**\n```\n"
+                                    execution_display += output[:1000]  # Limit output length for Discord
+                                    if len(output) > 1000:
+                                        execution_display += "\n... (output truncated)"
+                                    execution_display += "\n```"
+                                else:
+                                    execution_display += "**📤 Output:** *(No output)*"
+                            else:
+                                error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
+                                execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
+                                if len(error_msg) > 800:
+                                    execution_display += "*(Error message truncated)*"
+                            
+                            # Send the execution display to Discord as a separate message
+                            await discord_message.channel.send(execution_display)
                         
-                        # Send the execution display to Discord as a separate message
-                        await discord_message.channel.send(execution_display)
-                    
-                except Exception as e:
-                    logging.error(f"Error displaying code execution: {str(e)}")
+                    except Exception as e:
+                        logging.error(f"Error displaying code execution: {str(e)}")
             
             # If there are visualizations, handle them
             if execute_result and execute_result.get("visualizations"):
@@ -1349,6 +1353,11 @@ class MessageHandler:
     async def _google_search(self, args: Dict[str, Any]):
         """Perform a Google search with Discord display"""
         try:
+            # Find user_id from current task context
+            user_id = args.get("user_id")
+            if not user_id:
+                user_id = self._find_user_id_from_current_task()
+            
             # Get the Discord message to display search activity
             discord_message = self._get_discord_message_from_current_task()
             
@@ -1360,83 +1369,87 @@ class MessageHandler:
             from src.utils.web_utils import google_search
             result = await google_search(args)
             
-            # Display the search activity in Discord
+            # Display the search activity in Discord (only if user has enabled tool display)
             if discord_message and query:
-                try:
-                    # Parse the result to get structured data
-                    import json
-                    search_data = json.loads(result) if isinstance(result, str) else result
-                    
-                    # Get the combined content
-                    combined_content = search_data.get('combined_content', '')
-                    
-                    # Check if content is too long for Discord message (3000 chars limit)
-                    if len(combined_content) > 3000:
-                        # Send content as file attachment
-                        content_file = discord.File(
-                            io.StringIO(combined_content), 
-                            filename="search_results.txt"
-                        )
-                        
-                        # Create display text without full content
-                        search_display = "**🔍 Google Search**\n\n"
-                        search_display += f"**📝 Query:** `{query}`\n"
-                        search_display += f"**📊 Results:** {num_results} requested\n\n"
-                        
-                        # Show search results with links
-                        if 'results' in search_data and search_data['results']:
-                            search_display += "**🔗 Found Links:**\n"
-                            for i, item in enumerate(search_data['results'][:5], 1):
-                                title = item.get('title', 'No title')[:80]
-                                link = item.get('link', '')
-                                used_mark = "✅" if item.get('used_for_content', False) else "📄"
-                                search_display += f"{i}. {used_mark} [{title}]({link})\n"
-                            search_display += "\n"
-                        
-                        search_display += "**📄 Content:** *Attached as file (too long to display)*"
-                        
-                        if 'error' in search_data:
-                            search_display += f"\n**❌ Error:** {search_data['error'][:300]}"
-                        
-                        # Send with file attachment
-                        await discord_message.channel.send(search_display, file=content_file)
-                    else:
-                        # Use normal display for shorter content
-                        search_display = "**🔍 Google Search**\n\n"
-                        search_display += f"**📝 Query:** `{query}`\n"
-                        search_display += f"**📊 Results:** {num_results} requested\n\n"
-                        
-                        # Show search results with links
-                        if 'results' in search_data and search_data['results']:
-                            search_display += "**🔗 Found Links:**\n"
-                            for i, item in enumerate(search_data['results'][:5], 1):
-                                title = item.get('title', 'No title')[:80]
-                                link = item.get('link', '')
-                                used_mark = "✅" if item.get('used_for_content', False) else "📄"
-                                search_display += f"{i}. {used_mark} [{title}]({link})\n"
-                            search_display += "\n"
-                        
-                        # Show content preview
-                        if combined_content.strip():
-                            search_display += "**📄 Content:**\n```\n"
-                            search_display += combined_content
-                            search_display += "\n```"
-                        else:
-                            search_display += "**📄 Content:** *(No content retrieved)*"
-                        
-                        if 'error' in search_data:
-                            search_display += f"\n**❌ Error:** {search_data['error']}"
-                        
-                        # Send the search display to Discord
-                        await discord_message.channel.send(search_display)
-                        
-                except Exception as e:
-                    logging.error(f"Error displaying Google search: {str(e)}")
-                    # Fallback: just send a simple message to prevent bot from getting stuck
+                # Check user's tool display preference
+                show_search_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                
+                if show_search_details:
                     try:
-                        await discord_message.channel.send(f"🔍 Google search completed for: `{query}`")
-                    except:
-                        pass
+                        # Parse the result to get structured data
+                        import json
+                        search_data = json.loads(result) if isinstance(result, str) else result
+                        
+                        # Get the combined content
+                        combined_content = search_data.get('combined_content', '')
+                        
+                        # Check if content is too long for Discord message (3000 chars limit)
+                        if len(combined_content) > 3000:
+                            # Send content as file attachment
+                            content_file = discord.File(
+                                io.StringIO(combined_content), 
+                                filename="search_results.txt"
+                            )
+                            
+                            # Create display text without full content
+                            search_display = "**🔍 Google Search**\n\n"
+                            search_display += f"**📝 Query:** `{query}`\n"
+                            search_display += f"**📊 Results:** {num_results} requested\n\n"
+                            
+                            # Show search results with links
+                            if 'results' in search_data and search_data['results']:
+                                search_display += "**🔗 Found Links:**\n"
+                                for i, item in enumerate(search_data['results'][:5], 1):
+                                    title = item.get('title', 'No title')[:80]
+                                    link = item.get('link', '')
+                                    used_mark = "✅" if item.get('used_for_content', False) else "📄"
+                                    search_display += f"{i}. {used_mark} [{title}]({link})\n"
+                                search_display += "\n"
+                            
+                            search_display += "**📄 Content:** *Attached as file (too long to display)*"
+                            
+                            if 'error' in search_data:
+                                search_display += f"\n**❌ Error:** {search_data['error'][:300]}"
+                            
+                            # Send with file attachment
+                            await discord_message.channel.send(search_display, file=content_file)
+                        else:
+                            # Use normal display for shorter content
+                            search_display = "**🔍 Google Search**\n\n"
+                            search_display += f"**📝 Query:** `{query}`\n"
+                            search_display += f"**📊 Results:** {num_results} requested\n\n"
+                            
+                            # Show search results with links
+                            if 'results' in search_data and search_data['results']:
+                                search_display += "**🔗 Found Links:**\n"
+                                for i, item in enumerate(search_data['results'][:5], 1):
+                                    title = item.get('title', 'No title')[:80]
+                                    link = item.get('link', '')
+                                    used_mark = "✅" if item.get('used_for_content', False) else "📄"
+                                    search_display += f"{i}. {used_mark} [{title}]({link})\n"
+                                search_display += "\n"
+                            
+                            # Show content preview
+                            if combined_content.strip():
+                                search_display += "**📄 Content:**\n```\n"
+                                search_display += combined_content
+                                search_display += "\n```"
+                            else:
+                                search_display += "**📄 Content:** *(No content retrieved)*"
+                            
+                            if 'error' in search_data:
+                                search_display += f"\n**❌ Error:** {search_data['error']}"
+                            
+                            # Send the search display to Discord
+                            await discord_message.channel.send(search_display)
+                            
+                    except Exception as e:
+                        logging.error(f"Error displaying Google search: {str(e)}")
+                        # Fallback: just send a simple message to prevent bot from getting stuck
+                        try:
+                            await discord_message.channel.send(f"🔍 Google search completed for: `{query}`")
+                        except:
+                            pass
             
             return result
         except Exception as e:
@@ -1446,6 +1459,11 @@ class MessageHandler:
     async def _scrape_webpage(self, args: Dict[str, Any]):
         """Scrape a webpage with Discord display"""
         try:
+            # Find user_id from current task context
+            user_id = args.get("user_id")
+            if not user_id:
+                user_id = self._find_user_id_from_current_task()
+            
             # Get the Discord message to display scraping activity
             discord_message = self._get_discord_message_from_current_task()
             
@@ -1457,64 +1475,68 @@ class MessageHandler:
             from src.utils.web_utils import scrape_webpage
             result = await scrape_webpage(args)
             
-            # Display the scraping activity in Discord
+            # Display the scraping activity in Discord (only if user has enabled tool display)
             if discord_message and url:
-                try:
-                    # Parse the result to get structured data
-                    import json
-                    scrape_data = json.loads(result) if isinstance(result, str) else result
-                    
-                    # Get the scraped content
-                    content = scrape_data.get('content', '') if scrape_data.get('success') else ''
-                    
-                    # Check if content is too long for Discord message (3000 chars limit)
-                    if len(content) > 3000:
-                        # Send content as file attachment
-                        content_file = discord.File(
-                            io.StringIO(content), 
-                            filename="scraped_content.txt"
-                        )
-                        
-                        # Create display text without full content
-                        scrape_display = "**🌐 Webpage Scraping**\n\n"
-                        scrape_display += f"**🔗 URL:** {url}\n"
-                        scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
-                        scrape_display += "**📄 Content:** *Attached as file (too long to display)*"
-                        
-                        if 'error' in scrape_data:
-                            scrape_display += f"\n**❌ Error:** {scrape_data['error'][:300]}"
-                        elif content:
-                            scrape_display += f"\n**✅ Success:** Scraped {len(content)} characters"
-                        
-                        # Send with file attachment
-                        await discord_message.channel.send(scrape_display, file=content_file)
-                    else:
-                        # Use normal display for shorter content
-                        scrape_display = "**🌐 Webpage Scraping**\n\n"
-                        scrape_display += f"**🔗 URL:** {url}\n"
-                        scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
-                        
-                        # Show content
-                        if content.strip():
-                            scrape_display += "**📄 Content:**\n```\n"
-                            scrape_display += content
-                            scrape_display += "\n```"
-                        else:
-                            scrape_display += "**📄 Content:** *(No content retrieved)*"
-                        
-                        if 'error' in scrape_data:
-                            scrape_display += f"\n**❌ Error:** {scrape_data['error']}"
-                        
-                        # Send the scraping display to Discord
-                        await discord_message.channel.send(scrape_display)
-                        
-                except Exception as e:
-                    logging.error(f"Error displaying webpage scraping: {str(e)}")
-                    # Fallback: just send a simple message to prevent bot from getting stuck
+                # Check user's tool display preference
+                show_scrape_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                
+                if show_scrape_details:
                     try:
-                        await discord_message.channel.send(f"🌐 Webpage scraping completed for: {url}")
-                    except:
-                        pass
+                        # Parse the result to get structured data
+                        import json
+                        scrape_data = json.loads(result) if isinstance(result, str) else result
+                        
+                        # Get the scraped content
+                        content = scrape_data.get('content', '') if scrape_data.get('success') else ''
+                        
+                        # Check if content is too long for Discord message (3000 chars limit)
+                        if len(content) > 3000:
+                            # Send content as file attachment
+                            content_file = discord.File(
+                                io.StringIO(content), 
+                                filename="scraped_content.txt"
+                            )
+                            
+                            # Create display text without full content
+                            scrape_display = "**🌐 Webpage Scraping**\n\n"
+                            scrape_display += f"**🔗 URL:** {url}\n"
+                            scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
+                            scrape_display += "**📄 Content:** *Attached as file (too long to display)*"
+                            
+                            if 'error' in scrape_data:
+                                scrape_display += f"\n**❌ Error:** {scrape_data['error'][:300]}"
+                            elif content:
+                                scrape_display += f"\n**✅ Success:** Scraped {len(content)} characters"
+                            
+                            # Send with file attachment
+                            await discord_message.channel.send(scrape_display, file=content_file)
+                        else:
+                            # Use normal display for shorter content
+                            scrape_display = "**🌐 Webpage Scraping**\n\n"
+                            scrape_display += f"**🔗 URL:** {url}\n"
+                            scrape_display += f"**⚙️ Max Tokens:** {max_tokens}\n\n"
+                            
+                            # Show content
+                            if content.strip():
+                                scrape_display += "**📄 Content:**\n```\n"
+                                scrape_display += content
+                                scrape_display += "\n```"
+                            else:
+                                scrape_display += "**📄 Content:** *(No content retrieved)*"
+                            
+                            if 'error' in scrape_data:
+                                scrape_display += f"\n**❌ Error:** {scrape_data['error']}"
+                            
+                            # Send the scraping display to Discord
+                            await discord_message.channel.send(scrape_display)
+                            
+                    except Exception as e:
+                        logging.error(f"Error displaying webpage scraping: {str(e)}")
+                        # Fallback: just send a simple message to prevent bot from getting stuck
+                        try:
+                            await discord_message.channel.send(f"🌐 Webpage scraping completed for: {url}")
+                        except:
+                            pass
             
             return result
         except Exception as e:
