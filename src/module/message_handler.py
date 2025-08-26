@@ -242,7 +242,7 @@ class MessageHandler:
             # Display the executed code information in Discord (but not save to history)
             if discord_message and code_to_execute:
                 # Check user's tool display preference
-                show_execution_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                show_execution_details = await self.db.get_user_tool_display(user_id) if user_id else False
                 
                 if show_execution_details:
                     try:
@@ -1372,7 +1372,7 @@ class MessageHandler:
             # Display the search activity in Discord (only if user has enabled tool display)
             if discord_message and query:
                 # Check user's tool display preference
-                show_search_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                show_search_details = await self.db.get_user_tool_display(user_id) if user_id else False
                 
                 if show_search_details:
                     try:
@@ -1478,7 +1478,7 @@ class MessageHandler:
             # Display the scraping activity in Discord (only if user has enabled tool display)
             if discord_message and url:
                 # Check user's tool display preference
-                show_scrape_details = await self.db_handler.get_user_tool_display(user_id) if user_id else False
+                show_scrape_details = await self.db.get_user_tool_display(user_id) if user_id else False
                 
                 if show_scrape_details:
                     try:
