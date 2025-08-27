@@ -1150,7 +1150,6 @@ class MessageHandler:
             # Add tools if using a supported model
             if use_tools:
                 api_params["tools"] = get_tools_for_model()
-                api_params["tool_choice"] = "required"  # Force the model to use tools when available
             
             # Initialize variables to track tool responses
             image_generation_used = False
