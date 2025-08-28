@@ -22,23 +22,19 @@ if PROJECT_ROOT not in sys.path:
 
 
 def get_tools_for_model() -> List[Dict[str, Any]]:
-    """Returns concise tool definitions optimized for token usage."""
+    """Returns minimal tool definitions optimized for token usage."""
     return [
         {
             "type": "function",
             "function": {
                 "name": "analyze_data_file",
-                "description": "Analyze CSV/Excel files with templates or custom analysis.",
+                "description": "Analyze CSV/Excel files.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string", "description": "Path to CSV/Excel file"},
-                        "analysis_type": {
-                            "type": "string", 
-                            "enum": ["summary", "correlation", "distribution", "comprehensive"],
-                            "default": "comprehensive"
-                        },
-                        "custom_analysis": {"type": "string", "description": "Custom analysis request"}
+                        "file_path": {"type": "string"},
+                        "analysis_type": {"type": "string", "enum": ["summary", "correlation", "distribution", "comprehensive"]},
+                        "custom_analysis": {"type": "string"}
                     },
                     "required": ["file_path"]
                 }
@@ -48,12 +44,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "edit_image",
-                "description": "Edit images (remove background, etc). Returns image URLs.",
+                "description": "Edit images (remove background). Returns URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {"type": "string", "description": "Image URL to edit"},
-                        "operation": {"type": "string", "enum": ["remove_background"], "default": "remove_background"}
+                        "image_url": {"type": "string"},
+                        "operation": {"type": "string", "enum": ["remove_background"]}
                     },
                     "required": ["image_url"]
                 }
@@ -63,12 +59,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "enhance_prompt",
-                "description": "Create enhanced versions of text prompts.",
+                "description": "Create enhanced prompt versions.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string", "description": "Original prompt"},
-                        "num_versions": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5}
+                        "prompt": {"type": "string"},
+                        "num_versions": {"type": "integer", "minimum": 1, "maximum": 5}
                     },
                     "required": ["prompt"]
                 }
@@ -78,12 +74,10 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "image_to_text",
-                "description": "Convert image to text description.",
+                "description": "Convert image to text.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "image_url": {"type": "string", "description": "Image URL to analyze"}
-                    },
+                    "properties": {"image_url": {"type": "string"}},
                     "required": ["image_url"]
                 }
             }
@@ -92,12 +86,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function", 
             "function": {
                 "name": "upscale_image",
-                "description": "Upscale image resolution. Returns image URLs.",
+                "description": "Upscale image resolution. Returns URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {"type": "string", "description": "Image URL to upscale"},
-                        "scale_factor": {"type": "integer", "enum": [2, 3, 4], "default": 4}
+                        "image_url": {"type": "string"},
+                        "scale_factor": {"type": "integer", "enum": [2, 3, 4]}
                     },
                     "required": ["image_url"]
                 }
@@ -107,14 +101,14 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "photo_maker",
-                "description": "Generate images based on reference photos. Returns image URLs.",
+                "description": "Generate images from reference photos. Returns URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string", "description": "Generation prompt"},
-                        "input_images": {"type": "array", "items": {"type": "string"}, "description": "Reference image URLs"},
-                        "strength": {"type": "integer", "default": 40, "minimum": 1, "maximum": 100},
-                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4}
+                        "prompt": {"type": "string"},
+                        "input_images": {"type": "array", "items": {"type": "string"}},
+                        "strength": {"type": "integer", "minimum": 1, "maximum": 100},
+                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4}
                     },
                     "required": ["prompt", "input_images"]
                 }
@@ -124,13 +118,13 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image_with_refiner",
-                "description": "Generate high-quality images. Returns image URLs.",
+                "description": "Generate high-quality images. Returns URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string", "description": "Image prompt"},
-                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4},
-                        "negative_prompt": {"type": "string", "default": "blurry, low quality"}
+                        "prompt": {"type": "string"},
+                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4},
+                        "negative_prompt": {"type": "string"}
                     },
                     "required": ["prompt"]
                 }
@@ -144,8 +138,8 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                        "num_results": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10}
+                        "query": {"type": "string"},
+                        "num_results": {"type": "integer", "minimum": 1, "maximum": 10}
                     },
                     "required": ["query"]
                 }
@@ -158,9 +152,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
                 "description": "Extract content from webpage.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "Webpage URL"}
-                    },
+                    "properties": {"url": {"type": "string"}},
                     "required": ["url"]
                 }
             }
@@ -169,12 +161,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image",
-                "description": "Generate images from text prompts. Returns image URLs.",
+                "description": "Generate images from text. Returns URLs.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string", "description": "Image prompt"},
-                        "num_images": {"type": "integer", "default": 1, "minimum": 1, "maximum": 4}
+                        "prompt": {"type": "string"},
+                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4}
                     },
                     "required": ["prompt"]
                 }
@@ -184,19 +176,15 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": "Execute Python code with automatic package installation. IMPORTANT: If your code imports any library (pandas, numpy, requests, matplotlib, etc.), you MUST include it in 'install_packages' parameter or the code will fail. Always use print() statements to show output. Examples of packages: numpy, pandas, matplotlib, seaborn, requests, beautifulsoup4, opencv-python, scikit-learn, plotly, etc.",
+                "description": "Execute Python code with package installation. MUST use install_packages for any imports.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code": {"type": "string", "description": "Python code with print() statements for output"},
-                        "input_data": {"type": "string", "description": "Optional input data"},
-                        "install_packages": {
-                            "type": "array", 
-                            "items": {"type": "string"}, 
-                            "description": "REQUIRED: List ALL pip packages your code imports. Examples: ['pandas'] for pd.read_csv(), ['matplotlib'] for plt.plot(), ['requests'] for HTTP requests, ['numpy'] for arrays, ['beautifulsoup4'] for HTML parsing, etc. If you use ANY import statements, add the package here!"
-                        },
-                        "enable_visualization": {"type": "boolean", "description": "For charts/graphs"},
-                        "timeout": {"type": "integer", "default": 60, "minimum": 1, "maximum": 300, "description": "Execution timeout in seconds (default 60, max 300)"}
+                        "code": {"type": "string"},
+                        "input_data": {"type": "string"},
+                        "install_packages": {"type": "array", "items": {"type": "string"}},
+                        "enable_visualization": {"type": "boolean"},
+                        "timeout": {"type": "integer", "minimum": 1, "maximum": 300}
                     },
                     "required": ["code"]
                 }
@@ -206,12 +194,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "set_reminder",
-                "description": "Set user reminder. Supports relative time (30m, 2h, 1d), specific times (9:00, 15:30, 9:00 pm, 2:30 am), keywords (tomorrow, tonight, noon), and combinations (9:00 pm today, 2:00 pm tomorrow).",
+                "description": "Set user reminder with flexible time formats.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "content": {"type": "string", "description": "Reminder content"},
-                        "time": {"type": "string", "description": "Time in formats like: '30m', '2h', '1d', '9:00', '15:30', '9:00 pm', '2:30 am', '9:00 pm today', '2:00 pm tomorrow', 'tomorrow', 'tonight', 'noon'"}
+                        "content": {"type": "string"},
+                        "time": {"type": "string"}
                     },
                     "required": ["content", "time"]
                 }
@@ -222,7 +210,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "function": {
                 "name": "get_reminders",
                 "description": "Get user reminders list.",
-                "parameters": {"type": "object", "properties": {}, "required": []}
+                "parameters": {"type": "object", "properties": {}}
             }
         }
     ]
@@ -324,15 +312,8 @@ def prepare_messages_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     """Prepare message history for the OpenAI API with image URL handling."""
     prepared_messages = []
     
-    # Check if there's a system message already
-    has_system_message = any(msg.get('role') == 'system' for msg in messages)
-    
-    # If no system message exists, add a default one
-    if not has_system_message:
-        prepared_messages.append({
-            "role": "system",
-            "content": "You are a helpful AI assistant. For image tools, you'll receive image URLs in responses - reference them instead of sending binary data."
-        })
+    # Note: System message handling is done in message_handler.py
+    # We don't add a default system message here to avoid duplication
     
     for msg in messages:
         # Skip messages with None content

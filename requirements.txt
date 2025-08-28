@@ -2,7 +2,6 @@ discord.py
 openai
 motor
 pymongo
-tiktoken
 pypdf
 beautifulsoup4
 requests
@@ -15,6 +14,5 @@ openpyxl
 seaborn
 tzlocal
 numpy
-scipy
 plotly
-nbformat
+tiktoken

@@ -12,6 +12,25 @@ from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.openai_utils import prepare_file_from_path
 
+# Model pricing per 1M tokens (in USD)
+MODEL_PRICING = {
+    "openai/gpt-4o": {"input": 5.00, "output": 20.00},
+    "openai/gpt-4o-mini": {"input": 0.60, "output": 2.40},
+    "openai/gpt-4.1": {"input": 2.00, "output": 8.00},
+    "openai/gpt-4.1-mini": {"input": 0.40, "output": 1.60},
+    "openai/gpt-4.1-nano": {"input": 0.10, "output": 0.40},
+    "openai/gpt-5": {"input": 1.25, "output": 10.00},
+    "openai/gpt-5-mini": {"input": 0.25, "output": 2.00},
+    "openai/gpt-5-nano": {"input": 0.05, "output": 0.40},
+    "openai/gpt-5-chat": {"input": 1.25, "output": 10.00},
+    "openai/o1-preview": {"input": 15.00, "output": 60.00},
+    "openai/o1-mini": {"input": 1.10, "output": 4.40},
+    "openai/o1": {"input": 15.00, "output": 60.00},
+    "openai/o3-mini": {"input": 1.10, "output": 4.40},
+    "openai/o3": {"input": 2.00, "output": 8.00},
+    "openai/o4-mini": {"input": 2.00, "output": 8.00}
+}
+
 # Dictionary to keep track of user requests and their cooldowns
 user_requests = {}
 # Dictionary to store user tasks
@@ -298,73 +317,90 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         
         await process_request(interaction, process_image_generation, prompt)
 
-    @tree.command(name="reset", description="Reset the bot by clearing user data.")
+    @tree.command(name="reset", description="Reset the bot by clearing user data and token usage statistics.")
     @check_blacklist()
     async def reset(interaction: discord.Interaction):
         """Resets the bot by clearing user data."""
         user_id = interaction.user.id
         await db_handler.save_history(user_id, [])
-        await interaction.response.send_message("Your conversation history has been cleared and reset!", ephemeral=True)
+        await db_handler.reset_user_token_stats(user_id)
+        await interaction.response.send_message("Your conversation history and token usage statistics have been cleared and reset!", ephemeral=True)
 
-    @tree.command(name="user_stat", description="Get your current input token, output token, and model.")
+    @tree.command(name="user_stat", description="Get your current token usage, costs, and model.")
     @check_blacklist()
     async def user_stat(interaction: discord.Interaction):
-        """Fetches and displays the current input token, output token, and model for the user."""
+        """Fetches and displays the current token usage, costs, and model for the user."""
         await interaction.response.defer(thinking=True, ephemeral=True)
         
         async def process_user_stat(interaction: discord.Interaction):
-            import tiktoken
-            
             user_id = interaction.user.id
-            history = await db_handler.get_history(user_id)
-            model = await db_handler.get_user_model(user_id) or DEFAULT_MODEL  # Default model
+            model = await db_handler.get_user_model(user_id) or DEFAULT_MODEL
 
-            # Adjust model for encoding purposes
-            if model in ["openai/gpt-4o", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o1-preview", "openai/o1-mini", "openai/o3-mini"]:
-                encoding_model = "openai/gpt-4o"
-            else:
-                encoding_model = model
-
-            # Retrieve the appropriate encoding for the selected model
-            encoding = tiktoken.get_encoding("o200k_base")
-
-            # Initialize token counts
-            input_tokens = 0
-            output_tokens = 0
-
-            # Calculate input and output tokens
-            if history:
-                for item in history:
-                    content = item.get('content', '')
-
-                    # Handle case where content is a list or other type
-                    if isinstance(content, list):
-                        content_str = ""
-                        for part in content:
-                            if isinstance(part, dict) and 'text' in part:
-                                content_str += part['text'] + " "
-                        content = content_str
-
-                    # Ensure content is a string before processing
-                    if isinstance(content, str):
-                        tokens = len(encoding.encode(content))
-                        if item.get('role') == 'user':
-                            input_tokens += tokens
-                        elif item.get('role') == 'assistant':
-                            output_tokens += tokens
-
+            # Get token usage from database
+            token_stats = await db_handler.get_user_token_usage(user_id)
+            
+            total_input_tokens = token_stats.get('total_input_tokens', 0)
+            total_output_tokens = token_stats.get('total_output_tokens', 0)
+            total_cost = token_stats.get('total_cost', 0.0)
+            
+            # Get usage by model for detailed breakdown
+            model_usage = await db_handler.get_user_token_usage_by_model(user_id)
+            
             # Create the statistics message
             stat_message = (
-                f"**User Statistics:**\n"
-                f"Model: `{model}`\n"
-                f"Input Tokens: `{input_tokens}`\n"
-                f"Output Tokens: `{output_tokens}`\n"
+                f"**📊 User Statistics**\n"
+                f"Current Model: `{model}`\n"
+                f"Total Input Tokens: `{total_input_tokens:,}`\n"
+                f"Total Output Tokens: `{total_output_tokens:,}`\n"
+                f"**💰 Total Cost: `${total_cost:.6f}`**\n\n"
             )
+            
+            # Add breakdown by model if available
+            if model_usage:
+                stat_message += "**Model Usage Breakdown:**\n"
+                for model_name, usage in model_usage.items():
+                    input_tokens = usage.get('input_tokens', 0)
+                    output_tokens = usage.get('output_tokens', 0)
+                    cost = usage.get('cost', 0.0)
+                    stat_message += f"`{model_name.replace('openai/', '')}`: {input_tokens:,} in, {output_tokens:,} out, ${cost:.6f}\n"
 
             # Send the response
             await interaction.followup.send(stat_message, ephemeral=True)
         
         await process_request(interaction, process_user_stat)
+
+    @tree.command(name="prices", description="Display pricing information for all available AI models.")
+    @check_blacklist()
+    async def prices_command(interaction: discord.Interaction):
+        """Displays pricing information for all available AI models."""
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        
+        async def process_prices(interaction: discord.Interaction):
+            # Create the pricing message
+            pricing_message = (
+                "**💰 Model Pricing (per 1M tokens)**\n"
+                "```\n"
+                f"{'Model':<20} {'Input':<8} {'Output':<8}\n"
+                f"{'-' * 40}\n"
+            )
+            
+            for model, pricing in MODEL_PRICING.items():
+                model_short = model.replace("openai/", "")
+                pricing_message += f"{model_short:<20} ${pricing['input']:<7.2f} ${pricing['output']:<7.2f}\n"
+            
+            pricing_message += "```\n"
+            pricing_message += (
+                "**💡 Cost Examples:**\n"
+                "• A typical conversation (~1,000 tokens) with `gpt-4o-mini`: ~$0.002\n"
+                "• A typical conversation (~1,000 tokens) with `gpt-4o`: ~$0.025\n"
+                "• A typical conversation (~1,000 tokens) with `o1-preview`: ~$0.075\n\n"
+                "Use `/user_stat` to see your total usage and costs!"
+            )
+
+            # Send the response
+            await interaction.followup.send(pricing_message, ephemeral=True)
+        
+        await process_request(interaction, process_prices)
 
     @tree.command(name="help", description="Display a list of available commands.")
     @check_blacklist()
@@ -377,8 +413,9 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
             "/web `<url>` - Scrape a webpage and send the data to the AI model.\n"
             "/generate `<prompt>` - Generate an image from a text prompt.\n"
             "/toggle_tools - Toggle display of tool execution details (code, input, output).\n"
-            "/reset - Reset your chat history.\n"
-            "/user_stat - Get information about your input tokens, output tokens, and current model.\n"
+            "/reset - Reset your chat history and token usage statistics.\n"
+            "/user_stat - Get information about your token usage, costs, and current model.\n"
+            "/prices - Display pricing information for all available AI models.\n"
             "/help - Display this help message.\n"
         )
         await interaction.response.send_message(help_message, ephemeral=True)

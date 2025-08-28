@@ -5,13 +5,13 @@ import logging
 from bs4 import BeautifulSoup
 from typing import Dict, List, Any, Optional, Tuple
 from src.config.config import GOOGLE_API_KEY, GOOGLE_CX
-import tiktoken  # Add tiktoken for token counting
+import tiktoken  # Used only for preprocessing content before API calls
 
-# Global tiktoken encoder - initialized once to avoid blocking
+# Global tiktoken encoder for preprocessing - initialized once to avoid blocking
 try:
     TIKTOKEN_ENCODER = tiktoken.get_encoding("o200k_base")
 except Exception as e:
-    logging.error(f"Failed to initialize tiktoken encoder: {e}")
+    logging.error(f"Failed to initialize tiktoken encoder for preprocessing: {e}")
     TIKTOKEN_ENCODER = None
 
 def google_custom_search(query: str, num_results: int = 5, max_tokens: int = 4000) -> dict:
@@ -91,7 +91,7 @@ def scrape_multiple_links(urls: List[str], max_tokens: int = 4000) -> Tuple[str,
     total_tokens = 0
     used_urls = []
     
-    # Use global encoder directly (no async needed since it's pre-initialized)
+    # Use tiktoken for preprocessing estimation only
     encoding = TIKTOKEN_ENCODER
     
     for url in urls:
@@ -111,6 +111,7 @@ def scrape_multiple_links(urls: List[str], max_tokens: int = 4000) -> Tuple[str,
             # If this is the first URL and it's too large, we need to truncate it
             if not combined_content:
                 if encoding:
+                    # Use tiktoken for accurate preprocessing truncation
                     tokens = encoding.encode(content)
                     truncated_tokens = tokens[:max_tokens]
                     truncated_content = encoding.decode(truncated_tokens)
@@ -186,23 +187,27 @@ def scrape_web_content_with_count(url: str, max_tokens: int = 4000, return_token
         lines = (line.strip() for line in text.splitlines())
         text = '\n'.join(line for line in lines if line)
         
-        # Count tokens
+        # Count tokens using tiktoken for preprocessing accuracy
         token_count = 0
         try:
-            # Use global o200k_base encoder
-            encoding = TIKTOKEN_ENCODER
-            if encoding:
-                tokens = encoding.encode(text)
+            if TIKTOKEN_ENCODER:
+                tokens = TIKTOKEN_ENCODER.encode(text)
                 token_count = len(tokens)
-            
-            # Truncate if token count exceeds max_tokens and we're not returning token count
-            if len(tokens) > max_tokens and not return_token_count:
-                truncated_tokens = tokens[:max_tokens]
-                text = encoding.decode(truncated_tokens)
-                text += "...\n[Content truncated due to token limit]"
-        except ImportError:
+                
+                # Truncate if content exceeds max_tokens and we're not returning token count
+                if len(tokens) > max_tokens and not return_token_count:
+                    truncated_tokens = tokens[:max_tokens]
+                    text = TIKTOKEN_ENCODER.decode(truncated_tokens)
+                    text += "...\n[Content truncated due to token limit]"
+            else:
+                # Fallback to character-based estimation
+                token_count = len(text) // 4
+                if len(text) > max_tokens * 4 and not return_token_count:
+                    text = text[:max_tokens * 4] + "...\n[Content truncated due to length]"
+        except Exception as e:
+            logging.warning(f"Token counting failed for preprocessing: {e}")
             # Fallback to character-based estimation
-            token_count = len(text) // 4  # Rough estimate: 1 token ≈ 4 characters
+            token_count = len(text) // 4
             if len(text) > max_tokens * 4 and not return_token_count:
                 text = text[:max_tokens * 4] + "...\n[Content truncated due to length]"
         

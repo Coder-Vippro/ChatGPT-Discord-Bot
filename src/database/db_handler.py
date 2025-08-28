@@ -41,7 +41,26 @@ class DatabaseHandler:
         if user_data and 'history' in user_data:
             # Filter out expired image links
             filtered_history = self._filter_expired_images(user_data['history'])
-            return filtered_history
+            
+            # Proactive history trimming: Keep only the last 50 messages to prevent excessive token usage
+            # Always preserve system messages
+            system_messages = [msg for msg in filtered_history if msg.get('role') == 'system']
+            conversation_messages = [msg for msg in filtered_history if msg.get('role') != 'system']
+            
+            # Keep only the last 50 conversation messages
+            if len(conversation_messages) > 50:
+                conversation_messages = conversation_messages[-50:]
+                logging.info(f"Trimmed history for user {user_id}: kept last 50 conversation messages")
+            
+            # Combine system messages with trimmed conversation
+            trimmed_history = system_messages + conversation_messages
+            
+            # If history was trimmed, save the trimmed version back to DB
+            if len(trimmed_history) < len(filtered_history):
+                await self.save_history(user_id, trimmed_history)
+                logging.info(f"Saved trimmed history for user {user_id}: {len(trimmed_history)} messages")
+            
+            return trimmed_history
         return []
     
     def _filter_expired_images(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -180,6 +199,8 @@ class DatabaseHandler:
         await self.db.user_preferences.create_index("user_id")
         await self.db.whitelist.create_index("user_id")
         await self.db.blacklist.create_index("user_id")
+        await self.db.token_usage.create_index([("user_id", 1), ("timestamp", -1)])
+        await self.db.user_token_stats.create_index("user_id")
         
     async def ensure_reminders_collection(self):
         """
@@ -189,6 +210,90 @@ class DatabaseHandler:
         await self.reminders_collection.create_index([("user_id", 1), ("sent", 1)])
         await self.reminders_collection.create_index([("remind_at", 1), ("sent", 1)])
         logging.info("Ensured reminders collection and indexes")
+
+    # Token usage tracking methods
+    async def save_token_usage(self, user_id: int, model: str, input_tokens: int, output_tokens: int, cost: float):
+        """Save token usage and cost for a user"""
+        try:
+            usage_data = {
+                "user_id": user_id,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost": cost,
+                "timestamp": datetime.now()
+            }
+            
+            # Insert usage record
+            await self.db.token_usage.insert_one(usage_data)
+            
+            # Escape model name for MongoDB field names (replace dots and other special chars)
+            escaped_model = model.replace(".", "_DOT_").replace("/", "_SLASH_").replace("$", "_DOLLAR_")
+            
+            # Update user's total usage
+            await self.db.user_token_stats.update_one(
+                {"user_id": user_id},
+                {
+                    "$inc": {
+                        "total_input_tokens": input_tokens,
+                        "total_output_tokens": output_tokens,
+                        "total_cost": cost,
+                        f"models.{escaped_model}.input_tokens": input_tokens,
+                        f"models.{escaped_model}.output_tokens": output_tokens,
+                        f"models.{escaped_model}.cost": cost
+                    },
+                    "$set": {"last_updated": datetime.now()}
+                },
+                upsert=True
+            )
+            
+        except Exception as e:
+            logging.error(f"Error saving token usage: {e}")
+
+    async def get_user_token_usage(self, user_id: int) -> Dict[str, Any]:
+        """Get total token usage for a user"""
+        try:
+            user_stats = await self.db.user_token_stats.find_one({"user_id": user_id})
+            if user_stats:
+                return {
+                    "total_input_tokens": user_stats.get("total_input_tokens", 0),
+                    "total_output_tokens": user_stats.get("total_output_tokens", 0),
+                    "total_cost": user_stats.get("total_cost", 0.0)
+                }
+            return {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost": 0.0}
+        except Exception as e:
+            logging.error(f"Error getting user token usage: {e}")
+            return {"total_input_tokens": 0, "total_output_tokens": 0, "total_cost": 0.0}
+
+    async def get_user_token_usage_by_model(self, user_id: int) -> Dict[str, Dict[str, Any]]:
+        """Get token usage breakdown by model for a user"""
+        try:
+            user_stats = await self.db.user_token_stats.find_one({"user_id": user_id})
+            if user_stats and "models" in user_stats:
+                # Unescape model names for display
+                unescaped_models = {}
+                for escaped_model, usage in user_stats["models"].items():
+                    # Reverse the escaping
+                    original_model = escaped_model.replace("_DOT_", ".").replace("_SLASH_", "/").replace("_DOLLAR_", "$")
+                    unescaped_models[original_model] = usage
+                return unescaped_models
+            return {}
+        except Exception as e:
+            logging.error(f"Error getting user token usage by model: {e}")
+            return {}
+
+    async def reset_user_token_stats(self, user_id: int) -> None:
+        """Reset all token usage statistics for a user"""
+        try:
+            # Delete the user's token stats document
+            await self.db.user_token_stats.delete_one({"user_id": user_id})
+            
+            # Optionally, also delete individual usage records
+            await self.db.token_usage.delete_many({"user_id": user_id})
+            
+            logging.info(f"Reset token statistics for user {user_id}")
+        except Exception as e:
+            logging.error(f"Error resetting user token stats: {e}")
 
     async def close(self):
         """Properly close the database connection"""
