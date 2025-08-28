@@ -216,31 +216,31 @@ class TestOpenAIUtils(unittest.TestCase):
         self.assertEqual(untrimmed, short_text)
         
     def test_prepare_messages_for_api(self):
-        # Test empty messages
+        # Test empty messages - should return empty list (no system message added)
         empty_result = prepare_messages_for_api([])
-        self.assertEqual(len(empty_result), 1)  # Should have system message
-        self.assertEqual(empty_result[0]["role"], "system")  # Verify it's a system message
+        self.assertEqual(len(empty_result), 0)  # Should be empty, no system message added
         
-        # Test regular messages
+        # Test regular messages - should return messages as-is (no system message added)
         messages = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
             {"role": "user", "content": "How are you?"}
         ]
         result = prepare_messages_for_api(messages)
-        self.assertEqual(len(result), 4)  # Should have system message + 3 original messages
+        self.assertEqual(len(result), 3)  # Should have 3 original messages only
+        self.assertEqual(result[0]["role"], "user")
+        self.assertEqual(result[0]["content"], "Hello")
         
-        # Test with null content
+        # Test with null content - should filter out null content messages
         messages_with_null = [
             {"role": "user", "content": None},
             {"role": "assistant", "content": "Response"}
         ]
         result_fixed = prepare_messages_for_api(messages_with_null)
-        self.assertEqual(len(result_fixed), 2)  # Should have system message + 1 valid message
-        # Verify the content is correct (system message + only the assistant message)
-        self.assertEqual(result_fixed[0]["role"], "system")
-        self.assertEqual(result_fixed[1]["role"], "assistant")
-        self.assertEqual(result_fixed[1]["content"], "Response")
+        self.assertEqual(len(result_fixed), 1)  # Should have only 1 valid message (null filtered out)
+        # Verify the content is correct (only the assistant message)
+        self.assertEqual(result_fixed[0]["role"], "assistant")
+        self.assertEqual(result_fixed[0]["content"], "Response")
 
 class TestCodeUtils(unittest.TestCase):
     """Test code utility functions"""
