@@ -193,9 +193,21 @@ async def main():
         # Initialize message handler
         message_handler = MessageHandler(bot, db_handler, openai_client, image_generator)
         
+        # Attach db_handler to bot for cogs
+        bot.db_handler = db_handler
+        
         # Set up slash commands
         from src.commands.commands import setup_commands
         setup_commands(bot, db_handler, openai_client, image_generator)
+        
+        # Load file management commands
+        try:
+            from src.commands.file_commands import setup as setup_file_commands
+            await setup_file_commands(bot)
+            logging.info("File management commands loaded")
+        except Exception as e:
+            logging.error(f"Failed to load file commands: {e}")
+            logging.error(traceback.format_exc())
         
         # Handle shutdown signals
         loop = asyncio.get_running_loop()

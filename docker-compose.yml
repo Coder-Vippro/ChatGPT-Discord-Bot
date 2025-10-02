@@ -6,3 +6,39 @@ services:
     env_file:
       - .env
     restart: always
+    
+    # Mount volumes for persistent data
+    volumes:
+      # Persistent file storage (optional - for permanent file storage)
+      - bot_files:/tmp/bot_code_interpreter/user_files
+      # Persistent venv cache (speeds up package installation)
+      - bot_venv:/tmp/bot_code_interpreter/venv
+      # Output directory (for generated files)
+      - bot_outputs:/tmp/bot_code_interpreter/outputs
+    
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Healthcheck
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# Define volumes for persistent data
+volumes:
+  bot_files:
+    driver: local
+  bot_venv:
+    driver: local
+  bot_outputs:
+    driver: local

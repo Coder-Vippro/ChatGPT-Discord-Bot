@@ -1,13 +1,55 @@
+# Python cache and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Git and version control
 .git/
+.github/
+.gitignore
+.gitattributes
+
+# Environment files (provided at runtime)
 .env
+.env.*
+
+# Virtual environments
 .venv
 env/
 venv/
 ENV/
+
+# IDE files
 .idea/
 .vscode/
-.github/
+*.swp
+*.swo
+
+# Documentation (not needed in container)
+*.md
+docs/
+README.md
+LICENSE
+CODE_OF_CONDUCT.md
+SECURITY.md
+
+# Test files
+tests/
+test_*.py
+
+# Temporary and generated files
+*.log
+logs/
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+src/temp_data_files/
+src/outputs/
+outputs/
+
+# Database files (will be in MongoDB, not local)
+*.db
+*.sqlite
+*.sqlite3

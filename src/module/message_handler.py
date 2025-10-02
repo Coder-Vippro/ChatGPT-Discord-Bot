@@ -54,8 +54,40 @@ TEXT_FILE_EXTENSIONS = [
     '.go', '.rs', '.swift', '.kt', '.kts', '.dart', '.lua'
 ]
 
-# File extensions for data files
-DATA_FILE_EXTENSIONS = ['.csv', '.xlsx', '.xls']
+# File extensions for data files (ALL types - Python can handle almost anything!)
+# With code_interpreter, we support 200+ file types
+DATA_FILE_EXTENSIONS = [
+    # Tabular data
+    '.csv', '.tsv', '.tab', '.xlsx', '.xls', '.xlsm', '.xlsb', '.ods', '.numbers',
+    # Structured data
+    '.json', '.jsonl', '.ndjson', '.xml', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.properties', '.env',
+    # Database
+    '.db', '.sqlite', '.sqlite3', '.sql', '.mdb', '.accdb',
+    # Scientific/Binary
+    '.parquet', '.feather', '.arrow', '.hdf', '.hdf5', '.h5', '.pickle', '.pkl',
+    '.joblib', '.npy', '.npz', '.mat', '.sav', '.dta', '.sas7bdat', '.xpt', '.rda', '.rds',
+    # Text/Code
+    '.txt', '.text', '.log', '.out', '.err', '.md', '.markdown', '.rst', '.tex', '.adoc', '.org',
+    '.py', '.pyw', '.ipynb', '.r', '.R', '.rmd', '.js', '.ts', '.jsx', '.tsx', '.java', '.c', '.cpp',
+    '.h', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.m', '.pl', '.sh',
+    '.bash', '.zsh', '.ps1', '.lua', '.jl', '.nim', '.asm', '.html', '.htm', '.css', '.scss', '.sass',
+    '.vue', '.svelte',
+    # Geospatial
+    '.geojson', '.shp', '.shx', '.dbf', '.kml', '.kmz', '.gpx', '.gml',
+    # Scientific
+    '.fits', '.fts', '.dicom', '.dcm', '.nii', '.vtk', '.stl', '.obj', '.ply',
+    # Other data
+    '.avro', '.orc', '.protobuf', '.pb', '.msgpack', '.bson', '.cbor', '.pcap', '.pcapng',
+    # Documents (for text extraction)
+    '.pdf', '.doc', '.docx', '.odt', '.rtf', '.epub', '.mobi',
+    # Audio/Video (for metadata analysis)
+    '.mp3', '.wav', '.flac', '.ogg', '.aac', '.m4a', '.wma', '.opus', '.aiff',
+    '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg',
+    # Archives (Python can extract these)
+    '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar', '.tgz', '.tbz', '.lz', '.lzma', '.zst',
+    # Binary (generic - Python can read as bytes)
+    '.bin', '.dat'
+]
 
 # File extensions for image files (should never be processed as data)
 IMAGE_FILE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tiff', '.ico']
@@ -108,7 +140,6 @@ class MessageHandler:
             "google_search": self._google_search,
             "scrape_webpage": self._scrape_webpage,
             "execute_python_code": self._execute_python_code,
-            "analyze_data_file": self._analyze_data_file,
             "generate_image": self._generate_image,
             "edit_image": self._edit_image,
             "set_reminder": self._set_reminder,
@@ -181,6 +212,42 @@ class MessageHandler:
             logging.warning(f"Error counting tokens with tiktoken: {e}")
             return len(text) // 4
     
+    def _get_system_prompt_with_time(self) -> str:
+        """
+        Get the system prompt with current time and timezone information.
+        
+        Returns:
+            str: The system prompt with current datetime
+        """
+        from src.config.config import NORMAL_CHAT_PROMPT, TIMEZONE
+        
+        try:
+            # Try using zoneinfo (Python 3.9+)
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(TIMEZONE)
+            current_time = datetime.now(tz)
+            time_str = current_time.strftime("%A, %B %d, %Y at %I:%M:%S %p %Z")
+        except ImportError:
+            # Fallback: try pytz if zoneinfo is not available
+            try:
+                import pytz
+                tz = pytz.timezone(TIMEZONE)
+                current_time = datetime.now(tz)
+                time_str = current_time.strftime("%A, %B %d, %Y at %I:%M:%S %p %Z")
+            except Exception as e:
+                logging.warning(f"Error getting timezone with pytz: {e}, falling back to UTC")
+                current_time = datetime.utcnow()
+                time_str = current_time.strftime("%A, %B %d, %Y at %I:%M:%S %p UTC")
+        except Exception as e:
+            # Final fallback to UTC
+            logging.warning(f"Error getting timezone info: {e}, falling back to UTC")
+            current_time = datetime.utcnow()
+            time_str = current_time.strftime("%A, %B %d, %Y at %I:%M:%S %p UTC")
+        
+        # Prepend current time to the system prompt
+        time_prefix = f"Current date and time: {time_str}\n\n"
+        return time_prefix + NORMAL_CHAT_PROMPT
+    
     def _get_discord_message_from_current_task(self):
         """
         Utility method to get the Discord message from the current asyncio task.
@@ -243,7 +310,10 @@ class MessageHandler:
     # Note: _analyze_data function removed - replaced by execute_python_code and analyze_data_file
     
     async def _execute_python_code(self, args: Dict[str, Any]):
-        """Handle general Python code execution functionality"""
+        """
+        Handle Python code execution through code_interpreter
+        All user files are automatically accessible via load_file(file_id)
+        """
         try:
             # Find user_id from current task context
             user_id = args.get("user_id")
@@ -253,29 +323,36 @@ class MessageHandler:
             # Get the Discord message to send code execution display
             discord_message = self._get_discord_message_from_current_task()
             
-            # Add file context if user has uploaded data files
-            if user_id and user_id in self.user_data_files:
-                file_info = self.user_data_files[user_id]
-                file_context = f"\n\n# Data file available: {file_info['filename']}\n"
-                file_context += f"# File path: {file_info['file_path']}\n"
-                file_context += f"# You can access this file using: pd.read_csv('{file_info['file_path']}') or similar\n\n"
-                
-                # Prepend file context to the code
-                original_code = args.get("code", "")
-                args["code"] = file_context + original_code
-                
-                logging.info(f"Added file context to Python execution for user {user_id}")
+            # Get ALL user files from database (not just in-memory cache)
+            user_files = []
+            if user_id:
+                try:
+                    db_files = await self.db.get_user_files(user_id)
+                    user_files = [f['file_id'] for f in db_files if 'file_id' in f]
+                    if user_files:
+                        logging.info(f"Code execution will have access to {len(user_files)} file(s) for user {user_id}")
+                except Exception as e:
+                    logging.warning(f"Could not fetch user files: {e}")
             
-            # Extract code, input, and packages for display
+            # Extract code and packages for display
             code_to_execute = args.get("code", "")
-            input_data = args.get("input_data", "")
-            packages_to_install = args.get("install_packages", [])
+            install_packages = args.get("install_packages", [])
+            packages_to_install = install_packages  # For display purposes
+            input_data = args.get("input_data", "")  # For display purposes
             
-            # Import and call Python executor
-            from src.utils.python_executor import execute_python_code
-            execute_result = await execute_python_code(args)
+            # Import and call unified code interpreter
+            from src.utils.code_interpreter import execute_code
             
-            # Display the executed code information in Discord (but not save to history)
+            # Execute code with file access
+            execute_result = await execute_code(
+                code=code_to_execute,
+                user_id=user_id,
+                user_files=user_files,  # Pass all file_ids - code_interpreter handles load_file()
+                install_packages=install_packages,
+                db_handler=self.db
+            )
+            
+            # Display the executed code information in Discord
             if discord_message and code_to_execute:
                 # Check user's tool display preference
                 show_execution_details = await self.db.get_user_tool_display(user_id) if user_id else False
@@ -391,8 +468,64 @@ class MessageHandler:
                     except Exception as e:
                         logging.error(f"Error displaying code execution: {str(e)}")
             
-            # If there are visualizations, handle them
-            if execute_result and execute_result.get("visualizations"):
+            # Handle generated files (NEW unified approach)
+            if execute_result and execute_result.get("generated_files"):
+                generated_files = execute_result["generated_files"]
+                
+                # Send summary if multiple files
+                if len(generated_files) > 1 and discord_message:
+                    summary = f"📎 **Generated {len(generated_files)} file(s):**\n"
+                    for gf in generated_files:
+                        size_kb = gf.get('size', 0) / 1024
+                        file_type = gf.get('type', 'file')
+                        summary += f"• `{gf['filename']}` ({file_type}, {size_kb:.1f} KB)\n"
+                    await discord_message.channel.send(summary)
+                
+                # Send each generated file
+                for gf in generated_files:
+                    try:
+                        file_data = gf.get("data")
+                        filename = gf.get("filename", "output.txt")
+                        file_type = gf.get("type", "file")
+                        file_id = gf.get("file_id", "")
+                        
+                        if file_data and discord_message:
+                            # File type emoji mapping
+                            emoji_map = {
+                                "image": "🖼️",
+                                "data": "📊",
+                                "text": "📝",
+                                "structured": "📋",
+                                "html": "🌐",
+                                "pdf": "📄",
+                                "code": "💻",
+                                "archive": "📦",
+                                "file": "📎"
+                            }
+                            emoji = emoji_map.get(file_type, "📎")
+                            
+                            # Create Discord file and send
+                            file_bytes = io.BytesIO(file_data)
+                            discord_file = discord.File(file_bytes, filename=filename)
+                            
+                            caption = f"{emoji} `{filename}`"
+                            if file_id:
+                                caption += f" (ID: `{file_id}`)"
+                            
+                            # Send the file
+                            msg = await discord_message.channel.send(caption, file=discord_file)
+                            
+                            # For images, extract URL from the sent message for history
+                            if file_type == "image" and msg.attachments:
+                                chart_url = msg.attachments[0].url
+                                execute_result.setdefault("chart_urls", []).append(chart_url)
+                            
+                    except Exception as e:
+                        logging.error(f"Error sending generated file {gf.get('filename', 'unknown')}: {str(e)}")
+                        traceback.print_exc()
+            
+            # Legacy: Handle old visualizations format (for backward compatibility)
+            elif execute_result and execute_result.get("visualizations"):
                 for i, viz_path in enumerate(execute_result["visualizations"]):
                     try:
                         with open(viz_path, 'rb') as f:
@@ -475,14 +608,103 @@ class MessageHandler:
             # Get the Discord message to send code execution display
             discord_message = self._get_discord_message_from_current_task()
             
-            # Import and call data analyzer
-            from src.utils.data_analyzer import analyze_data_file
-            result = await analyze_data_file(args)
+            # Import and call unified code interpreter for data analysis
+            from src.utils.code_interpreter import execute_code, upload_discord_attachment
+            
+            # Get file_path from args first
+            file_path = args.get("file_path", "")
+            analysis_type = args.get("analysis_type", "")
+            custom_analysis = args.get("custom_analysis", "")
+            
+            # Check if this is a Discord attachment - upload it to code interpreter
+            if file_path and not file_path.startswith('/tmp/bot_code_interpreter'):
+                # This is an old-style file path, try to upload to new system
+                try:
+                    # Read the file
+                    with open(file_path, 'rb') as f:
+                        file_data = f.read()
+                    
+                    # Upload to new system
+                    filename = os.path.basename(file_path)
+                    from src.utils.code_interpreter import upload_file
+                    upload_result = await upload_file(
+                        user_id=user_id,
+                        file_data=file_data,
+                        filename=filename,
+                        file_type='csv' if file_path.endswith('.csv') else 'excel',
+                        db_handler=self.db
+                    )
+                    
+                    if upload_result['success']:
+                        # Use the new file path
+                        file_path = upload_result['file_path']
+                        logging.info(f"Migrated file to code interpreter: {file_path}")
+                except Exception as e:
+                    logging.warning(f"Could not migrate file to code interpreter: {e}")
+            
+            # Generate analysis code based on the request
+            # Detect file type
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext in ['.xlsx', '.xls']:
+                load_statement = f"df = pd.read_excel('{file_path}')"
+            elif file_ext == '.json':
+                load_statement = f"df = pd.read_json('{file_path}')"
+            elif file_ext == '.parquet':
+                load_statement = f"df = pd.read_parquet('{file_path}')"
+            else:  # Default to CSV
+                load_statement = f"df = pd.read_csv('{file_path}')"
+            
+            analysis_code = f"""
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+# Load data file
+{load_statement}
+
+# Display basic info
+print("=== Data Overview ===")
+print(f"Shape: {{df.shape}}")
+print(f"\\nColumns: {{df.columns.tolist()}}")
+print(f"\\nData Types:\\n{{df.dtypes}}")
+print(f"\\nMissing Values:\\n{{df.isnull().sum()}}")
+
+# Display statistical summary
+print("\\n=== Statistical Summary ===")
+print(df.describe())
+
+# Custom analysis based on type
+"""
+            if analysis_type == "summary":
+                analysis_code += """
+print("\\n=== First Few Rows ===")
+print(df.head(10))
+"""
+            elif analysis_type == "correlation" and custom_analysis:
+                analysis_code += f"""
+# Correlation analysis
+print("\\n=== Correlation Analysis ===")
+{custom_analysis}
+"""
+            elif custom_analysis:
+                analysis_code += f"""
+# Custom analysis
+{custom_analysis}
+"""
+            
+            # Execute the analysis code
+            result = await execute_code(
+                code=analysis_code,
+                user_id=user_id,
+                db_handler=self.db
+            )
             
             # Display the generated code if available
-            if discord_message and result and result.get("generated_code"):
+            if discord_message and analysis_code:
                 try:
-                    generated_code = result["generated_code"]
+                    generated_code = analysis_code
                     
                     # Check if code is too long for Discord message (3000 chars limit)
                     if len(generated_code) > 3000:
@@ -737,48 +959,69 @@ class MessageHandler:
     
     async def _download_and_save_data_file(self, attachment, user_id):
         """
-        Download and save a data file attachment for future use
+        Download and save file to code_interpreter system with automatic cleanup
+        Respects FILE_EXPIRATION_HOURS and MAX_FILES_PER_USER from .env
         
         Args:
             attachment: The Discord file attachment
             user_id: User ID for tracking
             
         Returns:
-            Dict with file info and path
+            Dict with file info including file_id for code_interpreter access
         """
         try:
-            # Get file contents and determine file type
-            file_extension = os.path.splitext(attachment.filename)[1].lower()
-            file_bytes = await attachment.read()
+            # Import code_interpreter's upload function
+            from src.utils.code_interpreter import upload_discord_attachment
+            from src.config.config import MAX_FILES_PER_USER
             
-            # Save file to local storage with timestamp
-            from src.utils.code_utils import DATA_FILES_DIR
-            temp_file_path = os.path.join(DATA_FILES_DIR, f"data_{user_id}_{int(time.time())}{file_extension}")
+            # Check user's current file count (enforce limit)
+            user_files = await self.db.get_user_files(user_id)
+            if len(user_files) >= MAX_FILES_PER_USER:
+                # Delete oldest file to make room
+                oldest_file = min(user_files, key=lambda f: f.get('uploaded_at', datetime.min))
+                from src.utils.code_interpreter import delete_file
+                await delete_file(oldest_file['file_id'], user_id, self.db)
+                logging.info(f"Deleted oldest file {oldest_file['file_id']} for user {user_id} (limit: {MAX_FILES_PER_USER})")
             
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(temp_file_path), exist_ok=True)
+            # Upload to code_interpreter (handles expiration automatically)
+            result = await upload_discord_attachment(
+                attachment=attachment,
+                user_id=user_id,
+                db_handler=self.db
+            )
             
-            # Save file
-            with open(temp_file_path, "wb") as f:
-                f.write(file_bytes)
-                
-            # Store the data file in user_data_files for future reference
+            if not result['success']:
+                raise Exception(result.get('error', 'Upload failed'))
+            
+            # Extract file info from result
+            metadata = result.get('metadata', {})
             file_info = {
-                "bytes": file_bytes,
-                "filename": attachment.filename,
-                "file_path": temp_file_path,
+                "file_id": result['file_id'],
+                "filename": metadata.get('filename', attachment.filename),
+                "file_type": metadata.get('file_type', 'unknown'),
+                "file_size": metadata.get('file_size', 0),
+                "file_path": metadata.get('file_path', ''),
+                "expires_at": metadata.get('expires_at'),
                 "timestamp": datetime.now()
             }
             
-            # Memory-efficient storage with cleanup
+            logging.info(
+                f"Uploaded file for user {user_id}: {file_info['filename']} "
+                f"(ID: {file_info['file_id']}, Type: {file_info['file_type']}, "
+                f"Size: {file_info['file_size']} bytes, Expires: {file_info['expires_at']})"
+            )
+            
+            return {"success": True, "file_info": file_info}
+            
+            # Store in memory for quick access (optional)
             self._cleanup_old_user_files()
             self.user_data_files[user_id] = file_info
             
-            logging.info(f"Downloaded and saved data file: {temp_file_path}")
+            logging.info(f"Uploaded file to code_interpreter: {attachment.filename} -> {save_result['file_id']}")
             return {"success": True, "file_info": file_info}
             
         except Exception as e:
-            error_msg = f"Error downloading data file: {str(e)}"
+            error_msg = f"Error uploading data file: {str(e)}"
             logging.error(error_msg)
             return {"success": False, "error": error_msg}
     
@@ -823,7 +1066,8 @@ class MessageHandler:
     
     async def _handle_data_file(self, attachment, message, user_id, history, model, start_time):
         """
-        Handle a data file attachment by downloading it and determining appropriate tool
+        Handle ANY data file by uploading to code_interpreter and adding context
+        All file types supported - AI will decide how to process via execute_python_code
         
         Args:
             attachment: The Discord file attachment
@@ -837,7 +1081,7 @@ class MessageHandler:
             Dict with processing results
         """
         try:
-            # First, download and save the file
+            # Upload file to code_interpreter system
             download_result = await self._download_and_save_data_file(attachment, user_id)
             
             if not download_result["success"]:
@@ -845,84 +1089,112 @@ class MessageHandler:
                 return download_result
             
             file_info = download_result["file_info"]
-            file_path = file_info["file_path"]
+            file_id = file_info["file_id"]
+            filename = file_info["filename"]
+            file_type = file_info.get("file_type", "unknown")
+            file_size = file_info.get("file_size", 0)
+            expires_at = file_info.get("expires_at", "Unknown")
             
             # Safety check: Ensure this is not an image file
-            file_ext = os.path.splitext(attachment.filename)[1].lower()
-            if file_ext in IMAGE_FILE_EXTENSIONS:
+            if file_type == "image" or os.path.splitext(filename)[1].lower() in IMAGE_FILE_EXTENSIONS:
                 await message.channel.send(
-                    f"🖼️ **Image File Detected**: {attachment.filename}\n"
-                    f"Images are handled directly by the AI model for visual analysis.\n"
-                    f"Your image has been sent to the AI for processing."
+                    f"🖼️ **Image File**: `{filename}`\n"
+                    f"Your image has been sent to the AI for visual analysis."
                 )
-                return {"success": True, "message": "Image processed directly by AI model"}
+                return {"success": True, "message": "Image processed by AI"}
             
-            # Extract query from message if any
-            content = message.content.strip()
-            query = content if content else "Analyze this data file and create relevant visualizations"
-            
-            # Detect user intent
-            intent = self._detect_user_intent(content)
-            
-            if intent == 'data_analysis':
-                # Use the specialized data analysis tool
-                await message.channel.send("📊 Analyzing data file with specialized data analysis tool...")
-                
-                # Determine analysis type based on query
-                analysis_type = "comprehensive"  # Default
-                if any(word in query.lower() for word in ['correlation', 'correlate', 'relationship']):
-                    analysis_type = "correlation"
-                elif any(word in query.lower() for word in ['distribution', 'histogram', 'spread']):
-                    analysis_type = "distribution"
-                elif any(word in query.lower() for word in ['summary', 'overview', 'basic']):
-                    analysis_type = "summary"
-                
-                # Call the data analysis tool directly
-                analysis_args = {
-                    "file_path": file_path,
-                    "analysis_type": analysis_type,
-                    "custom_analysis": query,
-                    "user_id": user_id
-                }
-                
-                result = await self._analyze_data_file(analysis_args)
-                
-                # The tool already handles Discord integration, so we just return the result
-                return result
-                
+            # Format file size for display
+            size_kb = file_size / 1024
+            size_mb = size_kb / 1024
+            if size_mb >= 1:
+                size_str = f"{size_mb:.2f} MB"
             else:
-                # For general programming, just inform the user that the file is ready
-                await message.channel.send(
-                    f"📁 **File Downloaded**: {attachment.filename}\n"
-                    f"File saved and ready for use in Python code.\n"
-                    f"You can now ask me to write Python code to process this data file."
-                )
-                
-                # Add file info to the conversation for context
-                file_context = f"\n\n[Data file uploaded: {attachment.filename} - Available at path: {file_path}]"
-                
-                # Add context to the current conversation
-                if len(history) > 0 and history[-1]["role"] == "user":
-                    if isinstance(history[-1]["content"], list):
-                        history[-1]["content"].append({
-                            "type": "text", 
-                            "text": file_context
-                        })
-                    else:
-                        history[-1]["content"] += file_context
-                
-                # Save updated history
-                await self.db.save_history(user_id, history)
-                
-                return {
-                    "success": True, 
-                    "message": "File ready for Python programming",
-                    "file_path": file_path,
-                    "intent": intent
-                }
+                size_str = f"{size_kb:.1f} KB"
+            
+            # Emoji based on file type
+            emoji_map = {
+                "csv": "📊", "excel": "📊", "tabular": "📊",
+                "json": "📋", "xml": "📋", "yaml": "📋", "structured": "📋",
+                "text": "📝", "markdown": "📝",
+                "database": "🗄️", "sql": "🗄️",
+                "parquet": "📦", "hdf5": "📦", "binary": "📦",
+                "python": "🐍", "code": "💻",
+                "geojson": "🌍", "shapefile": "🌍", "geospatial": "🌍"
+            }
+            emoji = emoji_map.get(file_type, "📎")
+            
+            # Inform user with detailed info
+            from src.config.config import MAX_FILES_PER_USER, FILE_EXPIRATION_HOURS
+            
+            user_files = await self.db.get_user_files(user_id)
+            files_count = len(user_files)
+            
+            expiration_info = f"{FILE_EXPIRATION_HOURS} hours" if FILE_EXPIRATION_HOURS > 0 else "Never (permanent storage)"
+            
+            await message.channel.send(
+                f"{emoji} **File Uploaded Successfully!**\n\n"
+                f"📁 **Name**: `{filename}`\n"
+                f"� **Type**: {file_type.upper()}\n"
+                f"💾 **Size**: {size_str}\n"
+                f"🆔 **File ID**: `{file_id}`\n"
+                f"⏰ **Expires**: {expires_at}\n"
+                f"� **Your Files**: {files_count}/{MAX_FILES_PER_USER}\n\n"
+                f"✅ **Ready for processing!** You can now:\n"
+                f"• Ask me to analyze this data\n"
+                f"• Request visualizations or insights\n"
+                f"• Write Python code to process it\n"
+                f"• The file is automatically accessible in code execution\n\n"
+                f"💡 **Examples:**\n"
+                f"```\n"
+                f"Analyze this data and show key statistics\n"
+                f"Create visualizations from this file\n"
+                f"Show me the first 10 rows\n"
+                f"Plot correlations between all numeric columns\n"
+                f"```"
+            )
+            
+            # Add file context to conversation history for AI
+            user_message = message.content.strip() if message.content else ""
+            
+            file_context = (
+                f"\n\n[User uploaded file: {filename}]\n"
+                f"[File ID: {file_id}]\n"
+                f"[File Type: {file_type}]\n"
+                f"[Size: {size_str}]\n"
+                f"[Available in code_interpreter via: load_file('{file_id}')]\n"
+            )
+            
+            if user_message:
+                file_context += f"[User's request: {user_message}]\n"
+            
+            # Append to the last user message in history
+            if len(history) > 0 and history[-1]["role"] == "user":
+                if isinstance(history[-1]["content"], list):
+                    history[-1]["content"].append({
+                        "type": "text", 
+                        "text": file_context
+                    })
+                else:
+                    history[-1]["content"] += file_context
+            else:
+                # Create new user message with file context
+                history.append({
+                    "role": "user",
+                    "content": file_context
+                })
+            
+            # Save updated history
+            await self.db.save_history(user_id, history)
+            
+            return {
+                "success": True, 
+                "file_id": file_id, 
+                "filename": filename,
+                "file_type": file_type
+            }
                 
         except Exception as e:
-            error_msg = f"Error handling data file: {str(e)}"
+            error_msg = f"Error handling file: {str(e)}"
             logging.error(error_msg)
             traceback.print_exc()
             await message.channel.send(f"❌ {error_msg}")
@@ -1098,31 +1370,33 @@ class MessageHandler:
             
             # For models that don't support system prompts
             if model in ["openai/o1-mini", "openai/o1-preview"]:
+                # Get fresh system prompt with current time
+                system_prompt = self._get_system_prompt_with_time()
+                
                 # Convert system messages to user instructions
-                system_content = None
                 history_without_system = []
                 
-                # Extract system message content
+                # Remove old system messages and keep conversation messages
                 for msg in history:
-                    if (msg.get('role') == 'system'):
-                        system_content = msg.get('content', '')
-                    else:
+                    if msg.get('role') != 'system':
                         history_without_system.append(msg)
                 
-                # Add the system content as a special user message at the beginning
-                if system_content:
-                    history_without_system.insert(0, {"role": "user", "content": f"Instructions: {system_content}"})
+                # Add the fresh system content as a special user message at the beginning
+                history_without_system.insert(0, {"role": "user", "content": f"Instructions: {system_prompt}"})
                 
                 # Add current message and prepare for API
                 history_without_system.append(current_message)
                 messages_for_api = prepare_messages_for_api(history_without_system)
             else:
                 # For models that support system prompts
-                from src.config.config import NORMAL_CHAT_PROMPT
+                # Always update system prompt with current time
+                system_prompt = self._get_system_prompt_with_time()
                 
-                # Add system prompt if not present
-                if not any(msg.get('role') == 'system' for msg in history):
-                    history.insert(0, {"role": "system", "content": NORMAL_CHAT_PROMPT})
+                # Remove old system message if present
+                history = [msg for msg in history if msg.get('role') != 'system']
+                
+                # Add updated system prompt with current time
+                history.insert(0, {"role": "system", "content": system_prompt})
                     
                 history.append(current_message)
                 messages_for_api = prepare_messages_for_api(history)
@@ -1152,8 +1426,8 @@ class MessageHandler:
                 # Save the trimmed history immediately to keep it in sync
                 if model in ["openai/o1-mini", "openai/o1-preview"]:
                     new_history = []
-                    if system_content:
-                        new_history.append({"role": "system", "content": system_content})
+                    # Save with fresh system prompt for consistency
+                    new_history.append({"role": "system", "content": system_prompt})
                     new_history.extend(history_without_system[1:])  # Skip the "Instructions" message
                     await self.db.save_history(user_id, new_history)
                 else:
@@ -1387,8 +1661,8 @@ class MessageHandler:
                     
                     # Sync back to regular history format by preserving system message
                     new_history = []
-                    if system_content:
-                        new_history.append({"role": "system", "content": system_content})
+                    # Save with fresh system prompt (will be updated with current time on next request)
+                    new_history.append({"role": "system", "content": system_prompt})
                     new_history.extend(history_without_system[1:])  # Skip the first "Instructions" message
                     
                     # Only keep a reasonable amount of history (reduced for memory)
@@ -1890,76 +2164,99 @@ class MessageHandler:
     
     def _trim_history_to_token_limit(self, history: List[Dict[str, Any]], model: str, target_tokens: int = None) -> List[Dict[str, Any]]:
         """
-        Trim conversation history using tiktoken for accurate token counting.
-        This is for internal operations only - billing uses API response tokens.
+        Trim conversation history using sliding window approach (like ChatGPT).
+        No summarization - just keep most recent messages that fit within limit.
+        Uses MODEL_TOKEN_LIMITS from config for each model.
         
         Args:
             history: List of message dictionaries
-            model: Model name (for logging)
-            target_tokens: Maximum tokens to keep (default varies by model)
+            model: Model name
+            target_tokens: Override token limit (optional)
             
         Returns:
             List[Dict[str, Any]]: Trimmed history within token limits
         """
         try:
-            # Set reasonable token limits based on model
+            from src.config.config import MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT
+            
+            # Get token limit for this model (use configured limits)
             if target_tokens is None:
-                if "gpt-4" in model.lower():
-                    target_tokens = 6000  # Conservative for gpt-4 models
-                elif "gpt-3.5" in model.lower():
-                    target_tokens = 3000  # Conservative for gpt-3.5
-                else:
-                    target_tokens = 4000  # Default for other models
+                target_tokens = MODEL_TOKEN_LIMITS.get(model, DEFAULT_TOKEN_LIMIT)
             
-            # Separate system messages from conversation
-            system_messages = []
-            conversation_messages = []
+            # Always preserve system messages
+            system_messages = [msg for msg in history if msg.get('role') == 'system']
+            conversation_messages = [msg for msg in history if msg.get('role') != 'system']
             
-            for msg in history:
-                if msg.get('role') == 'system':
-                    system_messages.append(msg)
-                else:
-                    conversation_messages.append(msg)
+            # Count tokens for system messages (always keep)
+            system_tokens = sum(
+                self._count_tokens_with_tiktoken(str(msg.get('content', '')))
+                for msg in system_messages
+            )
             
-            # Calculate tokens for system messages (always keep these)
-            system_token_count = 0
-            for msg in system_messages:
-                content = str(msg.get('content', ''))
-                system_token_count += self._count_tokens_with_tiktoken(content)
+            # Available tokens for conversation (reserve 20% for response)
+            available_tokens = int((target_tokens - system_tokens) * 0.8)
             
-            # Available tokens for conversation
-            available_tokens = max(0, target_tokens - system_token_count)
+            if available_tokens <= 0:
+                logging.warning(f"System messages exceed token limit! System: {system_tokens}, Limit: {target_tokens}")
+                return system_messages + conversation_messages[-1:]  # Keep at least last message
             
-            # Trim conversation messages from the beginning if needed
-            current_tokens = 0
-            trimmed_conversation = []
+            # Sliding window: Keep most recent messages that fit
+            # Group user+assistant pairs together for better context
+            message_pairs = []
+            i = len(conversation_messages) - 1
             
-            # Start from the end (most recent) and work backwards
-            for msg in reversed(conversation_messages):
-                content = str(msg.get('content', ''))
-                msg_tokens = self._count_tokens_with_tiktoken(content)
+            while i >= 0:
+                msg = conversation_messages[i]
                 
-                if current_tokens + msg_tokens <= available_tokens:
-                    trimmed_conversation.insert(0, msg)
-                    current_tokens += msg_tokens
+                # If assistant message, try to include the user message before it
+                if msg.get('role') == 'assistant' and i > 0 and conversation_messages[i-1].get('role') == 'user':
+                    pair = [conversation_messages[i-1], msg]
+                    i -= 2
                 else:
-                    # If this message would exceed the limit, stop trimming
+                    pair = [msg]
+                    i -= 1
+                
+                message_pairs.insert(0, pair)
+            
+            # Now select pairs from most recent until we hit token limit
+            selected_messages = []
+            current_tokens = 0
+            
+            for pair in reversed(message_pairs):
+                pair_tokens = sum(
+                    self._count_tokens_with_tiktoken(str(msg.get('content', '')))
+                    for msg in pair
+                )
+                
+                if current_tokens + pair_tokens <= available_tokens:
+                    selected_messages = pair + selected_messages
+                    current_tokens += pair_tokens
+                else:
+                    # Stop if we can't fit this pair
                     break
             
-            # Combine system messages with trimmed conversation
-            result = system_messages + trimmed_conversation
+            # Always keep at least the last user message if nothing fits
+            if not selected_messages and conversation_messages:
+                selected_messages = [conversation_messages[-1]]
+                current_tokens = self._count_tokens_with_tiktoken(str(conversation_messages[-1].get('content', '')))
             
-            logging.info(f"Trimmed history from {len(history)} to {len(result)} messages "
-                        f"(~{current_tokens + system_token_count} tokens for {model})")
+            result = system_messages + selected_messages
+            
+            messages_removed = len(conversation_messages) - len(selected_messages)
+            if messages_removed > 0:
+                logging.info(
+                    f"Sliding window trim: {len(history)} → {len(result)} messages "
+                    f"({messages_removed} removed, ~{current_tokens + system_tokens}/{target_tokens} tokens, {model})"
+                )
             
             return result
             
         except Exception as e:
             logging.error(f"Error trimming history: {e}")
+            traceback.print_exc()
             # Fallback: simple message count limit
-            max_messages = 15
+            max_messages = 20
             if len(history) > max_messages:
-                # Keep system messages and last N conversation messages
                 system_msgs = [msg for msg in history if msg.get('role') == 'system']
                 other_msgs = [msg for msg in history if msg.get('role') != 'system']
                 return system_msgs + other_msgs[-max_messages:]

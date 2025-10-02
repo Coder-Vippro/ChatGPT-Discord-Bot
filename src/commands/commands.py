@@ -11,6 +11,8 @@ from src.utils.image_utils import ImageGenerator
 from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.openai_utils import prepare_file_from_path
+from src.utils.token_counter import token_counter
+from src.utils.code_interpreter import delete_all_user_files
 
 # Model pricing per 1M tokens (in USD)
 MODEL_PRICING = {
@@ -174,6 +176,27 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                         {"role": "user", "content": f"{formatted_results}\n\nUser query: {query}"}
                     ]
 
+                # Check context limit before sending
+                context_check = await token_counter.check_context_limit(messages, model)
+                
+                if not context_check["within_limit"]:
+                    await interaction.followup.send(
+                        f"⚠️ Search results are too large ({context_check['input_tokens']:,} tokens). "
+                        f"Maximum context is {context_check['max_tokens']:,} tokens. "
+                        "Please try a more specific search query.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Count input tokens before API call
+                input_token_count = await token_counter.count_message_tokens(messages, model)
+                
+                logging.info(
+                    f"Search request - User: {user_id}, Model: {model}, "
+                    f"Input tokens: {input_token_count['total_tokens']} "
+                    f"(text: {input_token_count['text_tokens']}, images: {input_token_count['image_tokens']})"
+                )
+
                 # Send to the AI model
                 api_params = {
                     "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
@@ -188,6 +211,31 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
 
                 reply = response.choices[0].message.content
                 
+                # Get actual token usage from API response
+                usage = response.usage
+                actual_input_tokens = usage.prompt_tokens if usage else input_token_count['total_tokens']
+                actual_output_tokens = usage.completion_tokens if usage else token_counter.count_text_tokens(reply, model)
+                
+                # Calculate cost
+                cost = token_counter.estimate_cost(actual_input_tokens, actual_output_tokens, model)
+                
+                # Update database with detailed token info
+                await db_handler.save_token_usage(
+                    user_id=user_id,
+                    model=model,
+                    input_tokens=actual_input_tokens,
+                    output_tokens=actual_output_tokens,
+                    cost=cost,
+                    text_tokens=input_token_count['text_tokens'],
+                    image_tokens=input_token_count['image_tokens']
+                )
+                
+                logging.info(
+                    f"Search completed - User: {user_id}, "
+                    f"Input: {actual_input_tokens}, Output: {actual_output_tokens}, "
+                    f"Cost: ${cost:.6f}"
+                )
+                
                 # Add the interaction to history
                 history.append({"role": "user", "content": f"Search query: {query}"})
                 history.append({"role": "assistant", "content": reply})
@@ -201,12 +249,13 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                     
                     # Send a short message with the file attachment
                     await interaction.followup.send(
-                        f"The search response for '{query}' is too long for Discord (>{len(reply)} characters). Here's the full response as a text file:", 
+                        f"The search response for '{query}' is too long ({len(reply):,} characters). "
+                        f"Full response attached.\n💰 Cost: ${cost:.6f}", 
                         file=file
                     )
                 else:
                     # Send as normal message if within limits
-                    await interaction.followup.send(reply)
+                    await interaction.followup.send(f"{reply}\n\n💰 Cost: ${cost:.6f}")
 
             except Exception as e:
                 error_message = f"Search error: {str(e)}"
@@ -320,11 +369,29 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
     @tree.command(name="reset", description="Reset the bot by clearing user data and token usage statistics.")
     @check_blacklist()
     async def reset(interaction: discord.Interaction):
-        """Resets the bot by clearing user data."""
+        """Resets the bot by clearing user data and files."""
         user_id = interaction.user.id
+        
+        # Clear conversation history
         await db_handler.save_history(user_id, [])
+        
+        # Reset token statistics
         await db_handler.reset_user_token_stats(user_id)
-        await interaction.response.send_message("Your conversation history and token usage statistics have been cleared and reset!", ephemeral=True)
+        
+        # Delete all user files (from disk and database)
+        result = await delete_all_user_files(user_id, db_handler)
+        
+        # Build response message
+        message = "✅ Your conversation history and token usage statistics have been cleared and reset!"
+        
+        if result.get('success') and result.get('deleted_count', 0) > 0:
+            message += f"\n🗑️ Deleted {result['deleted_count']} file(s)."
+        elif result.get('success'):
+            message += "\n📁 No files to delete."
+        else:
+            message += f"\n⚠️ Warning: Could not delete some files. {result.get('error', '')}"
+        
+        await interaction.response.send_message(message, ephemeral=True)
 
     @tree.command(name="user_stat", description="Get your current token usage, costs, and model.")
     @check_blacklist()
@@ -341,6 +408,8 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
             
             total_input_tokens = token_stats.get('total_input_tokens', 0)
             total_output_tokens = token_stats.get('total_output_tokens', 0)
+            total_text_tokens = token_stats.get('total_text_tokens', 0)
+            total_image_tokens = token_stats.get('total_image_tokens', 0)
             total_cost = token_stats.get('total_cost', 0.0)
             
             # Get usage by model for detailed breakdown
@@ -349,20 +418,38 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
             # Create the statistics message
             stat_message = (
                 f"**📊 User Statistics**\n"
-                f"Current Model: `{model}`\n"
-                f"Total Input Tokens: `{total_input_tokens:,}`\n"
-                f"Total Output Tokens: `{total_output_tokens:,}`\n"
+                f"Current Model: `{model}`\n\n"
+                f"**Token Usage:**\n"
+                f"• Total Input: `{total_input_tokens:,}` tokens\n"
+                f"  ├─ Text: `{total_text_tokens:,}` tokens\n"
+                f"  └─ Images: `{total_image_tokens:,}` tokens\n"
+                f"• Total Output: `{total_output_tokens:,}` tokens\n"
+                f"• Combined: `{total_input_tokens + total_output_tokens:,}` tokens\n\n"
                 f"**💰 Total Cost: `${total_cost:.6f}`**\n\n"
             )
             
             # Add breakdown by model if available
             if model_usage:
-                stat_message += "**Model Usage Breakdown:**\n"
-                for model_name, usage in model_usage.items():
+                stat_message += "**Per-Model Breakdown:**\n"
+                for model_name, usage in sorted(
+                    model_usage.items(), 
+                    key=lambda x: x[1].get('cost', 0), 
+                    reverse=True
+                )[:10]:
                     input_tokens = usage.get('input_tokens', 0)
                     output_tokens = usage.get('output_tokens', 0)
+                    text_tokens = usage.get('text_tokens', 0)
+                    image_tokens = usage.get('image_tokens', 0)
                     cost = usage.get('cost', 0.0)
-                    stat_message += f"`{model_name.replace('openai/', '')}`: {input_tokens:,} in, {output_tokens:,} out, ${cost:.6f}\n"
+                    requests = usage.get('requests', 0)
+                    
+                    model_short = model_name.replace('openai/', '')
+                    stat_message += (
+                        f"`{model_short}`\n"
+                        f"  • {requests:,} requests, ${cost:.6f}\n"
+                        f"  • In: {input_tokens:,} ({text_tokens:,} text + {image_tokens:,} img)\n"
+                        f"  • Out: {output_tokens:,}\n"
+                    )
 
             # Send the response
             await interaction.followup.send(stat_message, ephemeral=True)

@@ -27,22 +27,6 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
-                "name": "analyze_data_file",
-                "description": "Analyze CSV/Excel files.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {"type": "string"},
-                        "analysis_type": {"type": "string", "enum": ["summary", "correlation", "distribution", "comprehensive"]},
-                        "custom_analysis": {"type": "string"}
-                    },
-                    "required": ["file_path"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
                 "name": "edit_image",
                 "description": "Edit images (remove background). Returns URLs.",
                 "parameters": {
@@ -176,15 +160,33 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": "Execute Python code with package installation. MUST use install_packages for any imports.",
+                "description": """Execute Python with AUTO-INSTALL. Packages (pandas, numpy, matplotlib, seaborn, sklearn, plotly, opencv, etc.) install automatically when imported. Just use 'import' normally. Generated files (CSV, images, JSON) auto-captured and sent to user (stored 48h). Load user files: load_file('file_id'). Example: import pandas as pd; df=load_file('id'); df.to_csv('out.csv')""",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code": {"type": "string"},
-                        "input_data": {"type": "string"},
-                        "install_packages": {"type": "array", "items": {"type": "string"}},
-                        "enable_visualization": {"type": "boolean"},
-                        "timeout": {"type": "integer", "minimum": 1, "maximum": 300}
+                        "code": {
+                            "type": "string",
+                            "description": "Python code to execute. Import any approved package - they auto-install!"
+                        },
+                        "input_data": {
+                            "type": "string",
+                            "description": "Optional input data (DEPRECATED - use load_file() in code instead)"
+                        },
+                        "install_packages": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "OPTIONAL: Pre-install packages. Usually not needed as packages auto-install on import."
+                        },
+                        "enable_visualization": {
+                            "type": "boolean",
+                            "description": "DEPRECATED: Just use plt.savefig() to create images"
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 300,
+                            "description": "Execution timeout in seconds (default: 60)"
+                        }
                     },
                     "required": ["code"]
                 }
