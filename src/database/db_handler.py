@@ -341,7 +341,7 @@ class DatabaseHandler:
     async def get_user_files(self, user_id: int) -> List[Dict[str, Any]]:
         """Get all files for a specific user"""
         try:
-            current_time = datetime.now()
+            current_time = datetime.now().isoformat()  # Use ISO string for comparison
             files = await self.db.user_files.find({
                 "user_id": user_id,
                 "$or": [
@@ -349,6 +349,7 @@ class DatabaseHandler:
                     {"expires_at": None}  # Never expires
                 ]
             }).to_list(length=1000)
+            logging.info(f"[DEBUG] Query returned {len(files)} files for user {user_id}")
             return files
         except Exception as e:
             logging.error(f"Error getting user files: {e}")

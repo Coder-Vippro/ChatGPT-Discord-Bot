@@ -125,13 +125,33 @@ Tools:
 
 ✅ Approved: pandas, numpy, matplotlib, seaborn, scikit-learn, tensorflow, pytorch, plotly, opencv, scipy, statsmodels, pillow, openpyxl, geopandas, folium, xgboost, lightgbm, bokeh, altair, and 80+ more.
 
-📂 File Access: User files are AUTOMATICALLY available via load_file('file_id'). The system tells you when files are uploaded with their file_id. Just use load_file() - it auto-detects file type (CSV→DataFrame, Excel→DataFrame, JSON→dict, etc.)
+📂 File Access: When users upload files, you'll receive the file_id in the conversation context (e.g., "File ID: abc123_xyz"). Use load_file('file_id') to access them. The function auto-detects file types:
+- CSV/TSV → pandas DataFrame
+- Excel (.xlsx, .xls) → pandas ExcelFile object (use .sheet_names and .parse('Sheet1'))
+- JSON → dict or DataFrame
+- Images → PIL Image object
+- Text → string content
+- And 200+ more formats...
+
+📊 Excel Files: load_file() returns ExcelFile object for multi-sheet support:
+  excel_file = load_file('file_id')
+  sheets = excel_file.sheet_names  # Get all sheet names
+  df = excel_file.parse('Sheet1')  # Read specific sheet
+  # Or: df = pd.read_excel(excel_file, sheet_name='Sheet1')
+  # Check if sheet has data: if not df.empty and len(df.columns) > 0
+
+⚠️ IMPORTANT: 
+- If load_file() fails, error lists available file IDs - use the correct one
+- Always check if DataFrames are empty before operations like .describe()
+- Excel files may have empty sheets - skip or handle them gracefully
 
 💾 Output Files: ALL generated files (CSV, images, JSON, text, plots, etc.) are AUTO-CAPTURED and sent to user. Files stored for 48h (configurable). Just create files - they're automatically shared!
 
 ✅ DO: 
 - Import packages directly (auto-installs!)
-- Use load_file('file_id') for user uploads
+- Use load_file('file_id') with the EXACT file_id from context
+- Check if DataFrames are empty: if not df.empty and len(df.columns) > 0
+- Handle errors gracefully (empty sheets, missing data, etc.)
 - Create output files with descriptive names
 - Generate visualizations (plt.savefig, etc.)
 - Return multiple files (data + plots + reports)
@@ -141,6 +161,7 @@ Tools:
 - Use install_packages parameter
 - Print large datasets (create CSV instead)
 - Manually handle file paths
+- Guess file_ids - use the exact ID from the upload message
 
 Example:
 ```python
@@ -148,16 +169,26 @@ import pandas as pd
 import seaborn as sns  # Auto-installs!
 import matplotlib.pyplot as plt
 
-# Load user's file (file_id provided in context)
-df = load_file('abc123')  # Auto-detects CSV/Excel/JSON/etc
+# Load user's file (file_id from upload message: "File ID: 123456_abc")
+data = load_file('123456_abc')  # Auto-detects type
 
-# Process and analyze
-summary = df.describe()
-summary.to_csv('summary_stats.csv')
+# For Excel files:
+if hasattr(data, 'sheet_names'):  # It's an ExcelFile
+    for sheet in data.sheet_names:
+        df = data.parse(sheet)
+        if not df.empty and len(df.columns) > 0:
+            # Process non-empty sheets
+            summary = df.describe()
+            summary.to_csv(f'{sheet}_summary.csv')
+else:  # It's already a DataFrame (CSV, etc.)
+    df = data
+    summary = df.describe()
+    summary.to_csv('summary_stats.csv')
 
 # Create visualization
-sns.heatmap(df.corr(), annot=True)
-plt.savefig('correlation_plot.png')
+if not df.empty:
+    sns.heatmap(df.corr(), annot=True)
+    plt.savefig('correlation_plot.png')
 
 # Everything is automatically sent to user!
 ```

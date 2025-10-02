@@ -71,9 +71,10 @@ APPROVED_PACKAGES = {
 }
 
 # Blocked patterns
+# Note: We allow open() for writing to enable saving plots and outputs
+# The sandboxed environment restricts file access to safe directories
 BLOCKED_PATTERNS = [
-    r'\bopen\s*\([^)]*[\'"]w',
-    r'\bopen\s*\([^)]*[\'"]a',
+    # Dangerous system modules
     r'import\s+os\b(?!\s*\.path)',
     r'from\s+os\s+import\s+(?!path)',
     r'import\s+shutil\b',
@@ -90,12 +91,14 @@ BLOCKED_PATTERNS = [
     r'from\s+requests\s+import',
     r'import\s+aiohttp\b',
     r'from\s+aiohttp\s+import',
+    # Dangerous code execution
     r'__import__\s*\(',
     r'\beval\s*\(',
     r'\bexec\s*\(',
     r'\bcompile\s*\(',
     r'\bglobals\s*\(',
     r'\blocals\s*\(',
+    # File system operations (dangerous)
     r'\.unlink\s*\(',
     r'\.rmdir\s*\(',
     r'\.remove\s*\(',
@@ -151,7 +154,13 @@ class FileManager:
             }
             
             if self.db:
-                await self.db.db.user_files.insert_one(metadata)
+                # Use update_one with upsert to avoid duplicate key errors
+                await self.db.db.user_files.update_one(
+                    {"file_id": file_id},
+                    {"$set": metadata},
+                    upsert=True
+                )
+                logger.info(f"[DEBUG] Saved file metadata to database: {file_id}")
             
             expiration_msg = "never expires" if FILE_EXPIRATION_HOURS == -1 else f"expires in {FILE_EXPIRATION_HOURS}h"
             logger.info(f"Saved file {filename} for user {user_id}: {file_id} ({expiration_msg})")
@@ -732,10 +741,21 @@ class CodeExecutor:
         try:
             file_paths_map = {}
             if user_files:
+                logger.info(f"Processing {len(user_files)} file(s) for code execution")
                 for file_id in user_files:
                     file_meta = await self.file_manager.get_file(file_id, user_id)
                     if file_meta:
                         file_paths_map[file_id] = file_meta['file_path']
+                        logger.info(f"Added file to execution context: {file_id} -> {file_meta['file_path']}")
+                    else:
+                        logger.warning(f"File {file_id} not found or expired for user {user_id}")
+                
+                if file_paths_map:
+                    logger.info(f"Total files accessible in execution: {len(file_paths_map)}")
+                else:
+                    logger.warning(f"No files found for user {user_id} despite {len(user_files)} file_ids provided")
+            else:
+                logger.debug("No user files provided for code execution")
             
             env_setup = f"""
 import sys
@@ -747,9 +767,36 @@ def load_file(file_id):
     '''
     Load a file automatically based on its extension.
     Supports 200+ file types with smart auto-detection.
+    
+    Args:
+        file_id: The file ID provided when the file was uploaded
+    
+    Returns:
+        Loaded file data (varies by file type):
+        - CSV/TSV: pandas DataFrame
+        - Excel (.xlsx, .xls): pandas ExcelFile object
+        - JSON: pandas DataFrame or dict
+        - Parquet/Feather: pandas DataFrame
+        - Text files: string content
+        - Images: PIL Image object
+        - And 200+ more formats...
+    
+    Excel file usage examples:
+        excel_file = load_file('file_id')
+        sheet_names = excel_file.sheet_names
+        df = excel_file.parse('Sheet1')
+        df2 = pd.read_excel(excel_file, sheet_name='Sheet1')
+    
+    Available files: {{', '.join(FILES.keys()) if FILES else 'None'}}
     '''
     if file_id not in FILES:
-        raise ValueError(f"File {{file_id}} not found or not accessible")
+        available_files = list(FILES.keys())
+        error_msg = f"File '{{file_id}}' not found or not accessible.\\n"
+        if available_files:
+            error_msg += f"Available file IDs: {{', '.join(available_files)}}"
+        else:
+            error_msg += "No files are currently accessible. Make sure to upload a file first."
+        raise ValueError(error_msg)
     file_path = FILES[file_id]
     
     # Import common libraries (they'll auto-install if needed)
@@ -763,9 +810,12 @@ def load_file(file_id):
     if ext == 'csv':
         return pd.read_csv(file_path)
     elif ext in ['xlsx', 'xls', 'xlsm', 'xlsb']:
-        return pd.read_excel(file_path)
+        # Return ExcelFile object for multi-sheet access
+        # Users can: excel_file.sheet_names, excel_file.parse('Sheet1'), or pd.read_excel(excel_file, sheet_name='Sheet1')
+        return pd.ExcelFile(file_path)
     elif ext == 'ods':
-        return pd.read_excel(file_path, engine='odf')
+        # Return ExcelFile object for ODS multi-sheet access
+        return pd.ExcelFile(file_path, engine='odf')
     elif ext == 'tsv' or ext == 'tab':
         return pd.read_csv(file_path, sep='\\t')
     

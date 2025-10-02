@@ -328,9 +328,15 @@ class MessageHandler:
             if user_id:
                 try:
                     db_files = await self.db.get_user_files(user_id)
+                    logging.info(f"[DEBUG] Fetched {len(db_files) if db_files else 0} files from DB for user {user_id}")
+                    if db_files:
+                        for f in db_files:
+                            logging.info(f"[DEBUG] DB file: {f.get('file_id', 'NO_ID')} - {f.get('filename', 'NO_NAME')}")
                     user_files = [f['file_id'] for f in db_files if 'file_id' in f]
                     if user_files:
-                        logging.info(f"Code execution will have access to {len(user_files)} file(s) for user {user_id}")
+                        logging.info(f"Code execution will have access to {len(user_files)} file(s) for user {user_id}: {user_files}")
+                    else:
+                        logging.warning(f"[DEBUG] No files found in database for user {user_id}")
                 except Exception as e:
                     logging.warning(f"Could not fetch user files: {e}")
             
@@ -405,17 +411,31 @@ class MessageHandler:
                                 
                                 if output and output.strip():
                                     execution_display += "**📤 Output:**\n```\n"
-                                    execution_display += output[:2000]  # More space for output when code is attached
-                                    if len(output) > 2000:
-                                        execution_display += "\n... (output truncated)"
+                                    # Calculate remaining space (2000 - current length - markdown)
+                                    remaining = 1900 - len(execution_display)
+                                    if remaining > 100:
+                                        execution_display += output[:remaining]
+                                        if len(output) > remaining:
+                                            execution_display += "\n... (output truncated)"
+                                    else:
+                                        execution_display += "(output too long)"
                                     execution_display += "\n```"
                                 else:
                                     execution_display += "**📤 Output:** *(No output)*"
                             else:
                                 error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
-                                execution_display += f"**❌ Error:**\n```\n{error_msg[:1000]}\n```"
-                                if len(error_msg) > 1000:
-                                    execution_display += "*(Error message truncated)*"
+                                # Calculate remaining space
+                                remaining = 1900 - len(execution_display)
+                                if remaining > 100:
+                                    execution_display += f"**❌ Error:**\n```\n{error_msg[:remaining]}\n```"
+                                    if len(error_msg) > remaining:
+                                        execution_display += "*(Error message truncated)*"
+                                else:
+                                    execution_display += "**❌ Error:** *(Error too long - see logs)*"
+                            
+                            # Final safety check: ensure total length < 2000
+                            if len(execution_display) > 1990:
+                                execution_display = execution_display[:1980] + "\n...(truncated)"
                             
                             # Send with file attachment
                             await discord_message.channel.send(execution_display, file=code_file)
@@ -450,17 +470,31 @@ class MessageHandler:
                                 
                                 if output and output.strip():
                                     execution_display += "**📤 Output:**\n```\n"
-                                    execution_display += output[:1000]  # Limit output length for Discord
-                                    if len(output) > 1000:
-                                        execution_display += "\n... (output truncated)"
+                                    # Calculate remaining space (2000 - current length - markdown)
+                                    remaining = 1900 - len(execution_display)
+                                    if remaining > 100:
+                                        execution_display += output[:remaining]
+                                        if len(output) > remaining:
+                                            execution_display += "\n... (output truncated)"
+                                    else:
+                                        execution_display += "(output too long)"
                                     execution_display += "\n```"
                                 else:
                                     execution_display += "**📤 Output:** *(No output)*"
                             else:
                                 error_msg = execute_result.get("error", "Unknown error") if execute_result else "Execution failed"
-                                execution_display += f"**❌ Error:**\n```\n{error_msg[:800]}\n```"
-                                if len(error_msg) > 800:
-                                    execution_display += "*(Error message truncated)*"
+                                # Calculate remaining space
+                                remaining = 1900 - len(execution_display)
+                                if remaining > 100:
+                                    execution_display += f"**❌ Error:**\n```\n{error_msg[:remaining]}\n```"
+                                    if len(error_msg) > remaining:
+                                        execution_display += "*(Error message truncated)*"
+                                else:
+                                    execution_display += "**❌ Error:** *(Error too long - see logs)*"
+                            
+                            # Final safety check: ensure total length < 2000
+                            if len(execution_display) > 1990:
+                                execution_display = execution_display[:1980] + "\n...(truncated)"
                             
                             # Send the execution display to Discord as a separate message
                             await discord_message.channel.send(execution_display)
@@ -636,24 +670,41 @@ class MessageHandler:
                     )
                     
                     if upload_result['success']:
-                        # Use the new file path
+                        # Get file_id for new load_file() system
+                        file_id = upload_result['file_id']
                         file_path = upload_result['file_path']
-                        logging.info(f"Migrated file to code interpreter: {file_path}")
+                        logging.info(f"Migrated file to code interpreter: {file_path} (ID: {file_id})")
                 except Exception as e:
                     logging.warning(f"Could not migrate file to code interpreter: {e}")
+                    file_id = None
+            else:
+                # File is already in new system, get file_id from args
+                file_id = args.get("file_id")
             
             # Generate analysis code based on the request
             # Detect file type
             file_ext = os.path.splitext(file_path)[1].lower()
             
-            if file_ext in ['.xlsx', '.xls']:
-                load_statement = f"df = pd.read_excel('{file_path}')"
-            elif file_ext == '.json':
-                load_statement = f"df = pd.read_json('{file_path}')"
-            elif file_ext == '.parquet':
-                load_statement = f"df = pd.read_parquet('{file_path}')"
-            else:  # Default to CSV
-                load_statement = f"df = pd.read_csv('{file_path}')"
+            # Use load_file() if we have a file_id, otherwise use direct path
+            if file_id:
+                if file_ext in ['.xlsx', '.xls']:
+                    load_statement = f"df = pd.read_excel(load_file('{file_id}'))"
+                elif file_ext == '.json':
+                    load_statement = f"df = pd.read_json(load_file('{file_id}'))"
+                elif file_ext == '.parquet':
+                    load_statement = f"df = pd.read_parquet(load_file('{file_id}'))"
+                else:  # Default to CSV
+                    load_statement = f"df = pd.read_csv(load_file('{file_id}'))"
+            else:
+                # Fallback to direct path for legacy support
+                if file_ext in ['.xlsx', '.xls']:
+                    load_statement = f"df = pd.read_excel('{file_path}')"
+                elif file_ext == '.json':
+                    load_statement = f"df = pd.read_json('{file_path}')"
+                elif file_ext == '.parquet':
+                    load_statement = f"df = pd.read_parquet('{file_path}')"
+                else:  # Default to CSV
+                    load_statement = f"df = pd.read_csv('{file_path}')"
             
             analysis_code = f"""
 import pandas as pd
@@ -695,9 +746,13 @@ print("\\n=== Correlation Analysis ===")
 """
             
             # Execute the analysis code
+            # Pass file_id as user_files if available
+            user_files_for_analysis = [file_id] if file_id else []
+            
             result = await execute_code(
                 code=analysis_code,
                 user_id=user_id,
+                user_files=user_files_for_analysis,
                 db_handler=self.db
             )
             
