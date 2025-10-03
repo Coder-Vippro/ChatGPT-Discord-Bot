@@ -490,11 +490,17 @@ class PackageManager:
         self.cache_file = PACKAGE_CACHE_FILE
         self.python_path = None
         self.pip_path = None
+        self.is_docker = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
         self._setup_paths()
     
     def _setup_paths(self):
         """Setup Python and pip executable paths."""
-        if os.name == 'nt':
+        # In Docker, use system Python directly (no venv needed)
+        if self.is_docker:
+            self.python_path = Path(sys.executable)
+            self.pip_path = Path(sys.executable).parent / "pip"
+            logger.info(f"Docker detected - using system Python: {self.python_path}")
+        elif os.name == 'nt':
             self.python_path = self.venv_dir / "Scripts" / "python.exe"
             self.pip_path = self.venv_dir / "Scripts" / "pip.exe"
         else:
@@ -535,6 +541,12 @@ class PackageManager:
     async def ensure_venv_ready(self) -> bool:
         """Ensure virtual environment is ready."""
         try:
+            # In Docker, we use system Python directly (no venv needed)
+            if self.is_docker:
+                logger.info("Docker environment detected - using system Python, skipping venv checks")
+                return True
+            
+            # Non-Docker: full validation
             if self._needs_cleanup():
                 logger.info("Performing periodic venv cleanup...")
                 await self._recreate_venv()
@@ -560,11 +572,29 @@ class PackageManager:
             return True
         except Exception as e:
             logger.error(f"Error ensuring venv ready: {e}")
+            # In Docker, continue even if there's an error
+            is_docker = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+            if is_docker:
+                logger.warning("Docker environment detected - continuing despite venv check error")
+                return True
             return False
     
     async def _recreate_venv(self):
         """Recreate virtual environment."""
         try:
+            # In Docker, we don't use venv at all - skip entirely
+            if self.is_docker:
+                logger.info("Docker environment detected - skipping venv recreation, using system Python")
+                # Initialize cache for package tracking
+                if not self.cache_file.exists():
+                    cache_data = {
+                        "packages": {},
+                        "last_cleanup": datetime.now().isoformat()
+                    }
+                    self._save_cache(cache_data)
+                return
+            
+            # Non-Docker: safe to recreate venv
             if self.venv_dir.exists():
                 shutil.rmtree(self.venv_dir)
             self.venv_dir.mkdir(parents=True, exist_ok=True)
@@ -583,7 +613,9 @@ class PackageManager:
             logger.info(f"Created fresh venv at {self.venv_dir}")
         except Exception as e:
             logger.error(f"Failed to recreate venv: {e}")
-            raise
+            # Don't raise in Docker - continue with system Python
+            if not self.is_docker:
+                raise
     
     def is_package_installed(self, package: str) -> bool:
         """Check if package is installed."""
