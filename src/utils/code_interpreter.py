@@ -20,6 +20,7 @@ import shutil
 import traceback
 import contextlib
 import venv
+import ast
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -538,19 +539,87 @@ class PackageManager:
         except Exception:
             return True
     
+    async def _cleanup_old_packages(self):
+        """Clean up packages not used in PACKAGE_CLEANUP_DAYS days."""
+        try:
+            cache = self._load_cache()
+            packages = cache.get("packages", {})
+            current_time = datetime.now()
+            packages_to_remove = []
+            
+            # Find packages older than PACKAGE_CLEANUP_DAYS
+            for package_lower, info in packages.items():
+                last_used = info.get("last_used", info.get("installed_at"))
+                if last_used:
+                    try:
+                        last_used_date = datetime.fromisoformat(last_used)
+                        days_unused = (current_time - last_used_date).days
+                        if days_unused > PACKAGE_CLEANUP_DAYS:
+                            packages_to_remove.append(info.get("name", package_lower))
+                    except Exception as e:
+                        logger.warning(f"Error parsing date for {package_lower}: {e}")
+            
+            if packages_to_remove:
+                logger.info(f"Found {len(packages_to_remove)} packages unused for >{PACKAGE_CLEANUP_DAYS} days: {packages_to_remove}")
+                
+                # In Docker: Uninstall individual packages from system
+                if self.is_docker:
+                    successfully_removed = []
+                    for package in packages_to_remove:
+                        try:
+                            logger.info(f"Uninstalling unused package from system: {package}")
+                            process = await asyncio.create_subprocess_exec(
+                                str(self.pip_path), "uninstall", "-y", package,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE
+                            )
+                            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+                            
+                            if process.returncode == 0:
+                                logger.info(f"✓ Successfully uninstalled: {package}")
+                                successfully_removed.append(package.lower())
+                            else:
+                                error_msg = stderr.decode()
+                                logger.warning(f"Failed to uninstall {package}: {error_msg}")
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Timeout uninstalling {package}")
+                        except Exception as e:
+                            logger.error(f"Error uninstalling {package}: {e}")
+                    
+                    # Remove successfully uninstalled packages from cache
+                    for package_lower in successfully_removed:
+                        cache["packages"].pop(package_lower, None)
+                    
+                    cache["last_cleanup"] = current_time.isoformat()
+                    self._save_cache(cache)
+                    logger.info(f"Docker cleanup completed. Removed {len(successfully_removed)}/{len(packages_to_remove)} packages.")
+                else:
+                    # In non-Docker: Recreate entire venv (existing behavior)
+                    logger.info("Non-Docker environment: recreating venv for cleanup")
+                    await self._recreate_venv()
+            else:
+                logger.info("No old packages to clean up")
+                # Update cleanup timestamp even if nothing to clean
+                cache["last_cleanup"] = current_time.isoformat()
+                self._save_cache(cache)
+                
+        except Exception as e:
+            logger.error(f"Error during package cleanup: {e}")
+    
     async def ensure_venv_ready(self) -> bool:
         """Ensure virtual environment is ready."""
         try:
+            # Check if cleanup is needed (both Docker and non-Docker)
+            if self._needs_cleanup():
+                logger.info("Performing periodic package cleanup...")
+                await self._cleanup_old_packages()
+            
             # In Docker, we use system Python directly (no venv needed)
             if self.is_docker:
                 logger.info("Docker environment detected - using system Python, skipping venv checks")
                 return True
             
             # Non-Docker: full validation
-            if self._needs_cleanup():
-                logger.info("Performing periodic venv cleanup...")
-                await self._recreate_venv()
-                return True
             if not self.venv_dir.exists() or not self.python_path.exists():
                 logger.info("Creating virtual environment...")
                 await self._recreate_venv()
@@ -625,11 +694,21 @@ class PackageManager:
     def mark_package_installed(self, package: str):
         """Mark package as installed."""
         cache = self._load_cache()
+        now = datetime.now().isoformat()
         cache["packages"][package.lower()] = {
-            "installed_at": datetime.now().isoformat(),
+            "installed_at": now,
+            "last_used": now,
             "name": package
         }
         self._save_cache(cache)
+    
+    def update_package_usage(self, package: str):
+        """Update last used timestamp for a package."""
+        cache = self._load_cache()
+        package_lower = package.lower()
+        if package_lower in cache.get("packages", {}):
+            cache["packages"][package_lower]["last_used"] = datetime.now().isoformat()
+            self._save_cache(cache)
     
     def is_package_approved(self, package: str) -> Tuple[bool, str]:
         """Check if package is approved for installation."""
@@ -698,6 +777,38 @@ class CodeExecutor:
             if re.search(pattern, code, re.IGNORECASE):
                 return False, f"Blocked unsafe operation: {pattern}"
         return True, "Code passed security validation"
+    
+    def _extract_imports_from_code(self, code: str) -> List[str]:
+        """
+        Extract imported module names from code using AST parsing.
+        
+        Args:
+            code: Python code to analyze
+        
+        Returns:
+            List of top-level module names (e.g., ['numpy', 'pandas', 'matplotlib'])
+        """
+        modules = set()
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        # Get top-level module (e.g., 'numpy' from 'numpy.random')
+                        module_name = alias.name.split('.')[0]
+                        modules.add(module_name)
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module:
+                        # Get top-level module (e.g., 'sklearn' from 'sklearn.metrics')
+                        module_name = node.module.split('.')[0]
+                        modules.add(module_name)
+        except SyntaxError:
+            # If code has syntax errors, we'll catch them during execution
+            logger.debug("Syntax error while parsing imports, will be caught during execution")
+        except Exception as e:
+            logger.warning(f"Error extracting imports: {e}")
+        
+        return list(modules)
     
     def _extract_missing_modules(self, error_output: str) -> List[str]:
         """
@@ -1090,6 +1201,18 @@ def load_file(file_id):
                     result["installed_packages"] = installed_packages
                 if failed_packages:
                     result["failed_packages"] = failed_packages
+                
+                # Track package usage if execution was successful
+                if return_code == 0:
+                    try:
+                        imported_modules = self._extract_imports_from_code(code)
+                        for module in imported_modules:
+                            # Update usage timestamp for installed packages
+                            if self.package_manager.is_package_installed(module):
+                                self.package_manager.update_package_usage(module)
+                                logger.debug(f"Updated usage timestamp for package: {module}")
+                    except Exception as e:
+                        logger.warning(f"Failed to track package usage: {e}")
                 
                 return result
                 
