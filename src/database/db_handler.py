@@ -5,21 +5,43 @@ import asyncio
 from datetime import datetime, timedelta
 import logging
 import re
+import os
+
+# Configure DNS resolver to be more resilient
+try:
+    import dns.resolver
+    dns.resolver.default_resolver = dns.resolver.Resolver(configure=False)
+    dns.resolver.default_resolver.nameservers = ['8.8.8.8', '8.8.4.4', '1.1.1.1']
+    dns.resolver.default_resolver.lifetime = 15.0  # 15 second timeout for DNS
+except ImportError:
+    logging.warning("dnspython not installed, using system DNS resolver")
+except Exception as e:
+    logging.warning(f"Could not configure custom DNS resolver: {e}")
 
 class DatabaseHandler:
-    def __init__(self, mongodb_uri: str):
-        """Initialize database connection with optimized settings"""
-        # Set up a memory-optimized connection pool
+    def __init__(self, mongodb_uri: str, max_retries: int = 5):
+        """Initialize database connection with optimized settings and retry logic"""
+        self.mongodb_uri = mongodb_uri
+        self.max_retries = max_retries
+        self._connected = False
+        self._connection_lock = asyncio.Lock()
+        
+        # Set up a memory-optimized connection pool with better resilience
         self.client = AsyncIOMotorClient(
             mongodb_uri,
-            maxIdleTimeMS=30000,        # Reduced from 45000
-            connectTimeoutMS=8000,      # Reduced from 10000
-            serverSelectionTimeoutMS=12000,  # Reduced from 15000
-            waitQueueTimeoutMS=3000,    # Reduced from 5000
-            socketTimeoutMS=25000,      # Reduced from 30000
-            maxPoolSize=8,              # Limit connection pool size
-            minPoolSize=2,              # Maintain minimum connections
-            retryWrites=True
+            maxIdleTimeMS=45000,           # Keep connections alive longer
+            connectTimeoutMS=20000,        # 20s connect timeout for DNS issues
+            serverSelectionTimeoutMS=30000, # 30s for server selection
+            waitQueueTimeoutMS=10000,      # Wait longer for available connection
+            socketTimeoutMS=45000,         # Socket operations timeout
+            maxPoolSize=10,                # Slightly larger pool
+            minPoolSize=1,                 # Keep at least 1 connection
+            retryWrites=True,
+            retryReads=True,               # Also retry reads
+            directConnection=False,        # Allow replica set discovery
+            appName="ChatGPT-Discord-Bot",
+            heartbeatFrequencyMS=30000,    # Reduce heartbeat frequency to avoid DNS issues
+            localThresholdMS=30,           # Local threshold for selecting servers
         )
         self.db = self.client['chatgpt_discord_bot']  # Database name
         
@@ -32,12 +54,86 @@ class DatabaseHandler:
         self.logs_collection = self.db.logs
         self.reminders_collection = self.db.reminders
         
-        logging.info("Database handler initialized")
+        logging.info("Database handler initialized with enhanced connection resilience")
+    
+    async def _retry_operation(self, operation, *args, **kwargs):
+        """Execute a database operation with retry logic for transient errors"""
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                return await operation(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                # Check for transient/retryable errors (expanded list)
+                retryable_errors = [
+                    'timeout', 'connection', 'socket', 'dns', 'try again', 
+                    'network', 'errno -3', 'gaierror', 'nodename', 'servname',
+                    'temporary failure', 'name resolution', 'unreachable',
+                    'reset by peer', 'broken pipe', 'not connected'
+                ]
+                if any(err in error_str for err in retryable_errors):
+                    wait_time = min((attempt + 1) * 2, 10)  # Exponential backoff: 2s, 4s, 6s, 8s, 10s (max)
+                    logging.warning(f"Database operation failed (attempt {attempt + 1}/{self.max_retries}): {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Non-retryable error, raise immediately
+                    raise
+        # All retries exhausted
+        logging.error(f"Database operation failed after {self.max_retries} attempts: {last_error}")
+        raise last_error
+    
+    async def ensure_connected(self) -> bool:
+        """Ensure database connection is established with retry logic"""
+        async with self._connection_lock:
+            if self._connected:
+                return True
+            
+            for attempt in range(self.max_retries):
+                try:
+                    await self.client.admin.command('ping')
+                    self._connected = True
+                    logging.info("Database connection established successfully")
+                    return True
+                except Exception as e:
+                    wait_time = min((attempt + 1) * 2, 10)
+                    logging.warning(f"Database connection attempt {attempt + 1}/{self.max_retries} failed: {e}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+            
+            logging.error("Failed to establish database connection after all retries")
+            return False
+    
+    async def check_connection(self) -> bool:
+        """Check if database connection is alive with graceful error handling"""
+        try:
+            # Use a short timeout for the ping operation
+            await asyncio.wait_for(
+                self.client.admin.command('ping'),
+                timeout=10.0
+            )
+            self._connected = True
+            return True
+        except asyncio.TimeoutError:
+            logging.warning("Database ping timed out")
+            self._connected = False
+            return False
+        except Exception as e:
+            error_str = str(e).lower()
+            # Don't log DNS resolution failures as errors (they're often transient)
+            if any(err in error_str for err in ['errno -3', 'try again', 'dns', 'gaierror']):
+                logging.debug(f"Transient database connection check failed (DNS): {e}")
+            else:
+                logging.error(f"Database connection check failed: {e}")
+            self._connected = False
+            return False
     
     # User history methods
     async def get_history(self, user_id: int) -> List[Dict[str, Any]]:
         """Get user conversation history and filter expired image links"""
-        user_data = await self.db.user_histories.find_one({'user_id': user_id})
+        async def _get():
+            return await self.db.user_histories.find_one({'user_id': user_id})
+        
+        user_data = await self._retry_operation(_get)
         if user_data and 'history' in user_data:
             # Filter out expired image links
             filtered_history = self._filter_expired_images(user_data['history'])

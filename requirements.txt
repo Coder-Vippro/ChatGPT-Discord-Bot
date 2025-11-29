@@ -1,12 +1,13 @@
 discord.py
 openai
 motor
-pymongo
+pymongo[srv]
+dnspython>=2.0.0
 pypdf
 beautifulsoup4
 requests
 aiohttp
-runware
+runware>=0.4.33
 python-dotenv
 matplotlib
 pandas

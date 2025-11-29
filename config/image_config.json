@@ -1,0 +1,266 @@
+{
+  "_comment": "Image Generation Configuration - Add/modify models here",
+  "_version": "2.0.0",
+  
+  "settings": {
+    "default_model": "flux",
+    "default_upscale_model": "clarity",
+    "default_background_removal_model": "bria",
+    "connection_timeout": 120,
+    "max_retries": 3,
+    "retry_delay": 2,
+    "output_format": "WEBP",
+    "output_quality": 95
+  },
+  
+  "image_models": {
+    "flux": {
+      "model_id": "runware:101@1",
+      "name": "FLUX.1",
+      "description": "High-quality FLUX model for general image generation",
+      "default_width": 1024,
+      "default_height": 1024,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 2048,
+      "max_height": 2048,
+      "step_size": 64,
+      "default_steps": 30,
+      "default_cfg_scale": 7.5,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "general"
+    },
+    "flux-dev": {
+      "model_id": "runware:100@1",
+      "name": "FLUX.1 Dev",
+      "description": "FLUX.1 Development version with more creative outputs",
+      "default_width": 1024,
+      "default_height": 1024,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 2048,
+      "max_height": 2048,
+      "step_size": 64,
+      "default_steps": 25,
+      "default_cfg_scale": 7.0,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "general"
+    },
+    "flux-fill": {
+      "model_id": "runware:102@1",
+      "name": "FLUX Fill",
+      "description": "FLUX model optimized for inpainting and editing",
+      "default_width": 1024,
+      "default_height": 1024,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 2048,
+      "max_height": 2048,
+      "step_size": 64,
+      "default_steps": 30,
+      "default_cfg_scale": 7.5,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "editing"
+    },
+    "sdxl": {
+      "model_id": "civitai:101055@128078",
+      "name": "Stable Diffusion XL",
+      "description": "Stable Diffusion XL for detailed, high-resolution images",
+      "default_width": 1024,
+      "default_height": 1024,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 2048,
+      "max_height": 2048,
+      "step_size": 64,
+      "default_steps": 30,
+      "default_cfg_scale": 7.0,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "general"
+    },
+    "realistic": {
+      "model_id": "civitai:4201@130072",
+      "name": "Realistic Vision",
+      "description": "Photorealistic image generation",
+      "default_width": 768,
+      "default_height": 768,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 1536,
+      "max_height": 1536,
+      "step_size": 64,
+      "default_steps": 35,
+      "default_cfg_scale": 7.5,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "realistic"
+    },
+    "anime": {
+      "model_id": "civitai:4384@128713",
+      "name": "Anime Style",
+      "description": "Anime and illustration style images",
+      "default_width": 768,
+      "default_height": 768,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 1536,
+      "max_height": 1536,
+      "step_size": 64,
+      "default_steps": 28,
+      "default_cfg_scale": 7.0,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "anime"
+    },
+    "dreamshaper": {
+      "model_id": "civitai:4384@128713",
+      "name": "DreamShaper",
+      "description": "Creative and artistic image generation",
+      "default_width": 768,
+      "default_height": 768,
+      "min_width": 512,
+      "min_height": 512,
+      "max_width": 1536,
+      "max_height": 1536,
+      "step_size": 64,
+      "default_steps": 30,
+      "default_cfg_scale": 7.0,
+      "supports_negative_prompt": true,
+      "max_images": 4,
+      "category": "artistic"
+    }
+  },
+  
+  "upscale_models": {
+    "clarity": {
+      "model_id": "runware:500@1",
+      "name": "Clarity",
+      "description": "High-quality clarity upscaling",
+      "supported_factors": [2, 4],
+      "max_input_size": 2048,
+      "max_output_size": 4096,
+      "supports_prompts": true
+    },
+    "ccsr": {
+      "model_id": "runware:501@1",
+      "name": "CCSR",
+      "description": "Content-consistent super-resolution upscaling",
+      "supported_factors": [2, 4],
+      "max_input_size": 2048,
+      "max_output_size": 4096,
+      "supports_prompts": true
+    },
+    "sd-latent": {
+      "model_id": "runware:502@1",
+      "name": "SD Latent Upscaler",
+      "description": "Stable Diffusion latent space upscaling",
+      "supported_factors": [2],
+      "max_input_size": 2048,
+      "max_output_size": 4096,
+      "supports_prompts": true
+    },
+    "swinir": {
+      "model_id": "runware:503@1",
+      "name": "SwinIR",
+      "description": "Fast and efficient SwinIR upscaling (supports 4x)",
+      "supported_factors": [2, 4],
+      "max_input_size": 2048,
+      "max_output_size": 4096,
+      "supports_prompts": false
+    }
+  },
+  
+  "background_removal_models": {
+    "bria": {
+      "model_id": "runware:110@1",
+      "name": "Bria RMBG 2.0",
+      "description": "High-quality background removal by Bria",
+      "supports_alpha_matting": false
+    },
+    "rembg": {
+      "model_id": "runware:109@1",
+      "name": "RemBG 1.4",
+      "description": "Classic RemBG with alpha matting support",
+      "supports_alpha_matting": true
+    },
+    "birefnet-base": {
+      "model_id": "runware:112@1",
+      "name": "BiRefNet Base",
+      "description": "BiRefNet base model for background removal",
+      "supports_alpha_matting": false
+    },
+    "birefnet-general": {
+      "model_id": "runware:112@5",
+      "name": "BiRefNet General",
+      "description": "BiRefNet general purpose model",
+      "supports_alpha_matting": false
+    },
+    "birefnet-portrait": {
+      "model_id": "runware:112@10",
+      "name": "BiRefNet Portrait",
+      "description": "BiRefNet optimized for portraits",
+      "supports_alpha_matting": false
+    }
+  },
+  
+  "controlnet_models": {
+    "flux-canny": {
+      "model_id": "runware:25@1",
+      "name": "FLUX Canny",
+      "description": "Edge detection control for FLUX models",
+      "architecture": "flux"
+    },
+    "flux-depth": {
+      "model_id": "runware:27@1",
+      "name": "FLUX Depth",
+      "description": "Depth map control for FLUX models",
+      "architecture": "flux"
+    },
+    "flux-pose": {
+      "model_id": "runware:29@1",
+      "name": "FLUX Pose",
+      "description": "Pose control for FLUX models",
+      "architecture": "flux"
+    },
+    "sdxl-canny": {
+      "model_id": "runware:20@1",
+      "name": "SDXL Canny",
+      "description": "Edge detection control for SDXL models",
+      "architecture": "sdxl"
+    },
+    "sd15-canny": {
+      "model_id": "civitai:38784@44716",
+      "name": "SD 1.5 Canny",
+      "description": "Edge detection control for SD 1.5 models",
+      "architecture": "sd15"
+    },
+    "sd15-lineart": {
+      "model_id": "civitai:38784@44877",
+      "name": "SD 1.5 Line Art",
+      "description": "Line art control for SD 1.5 models",
+      "architecture": "sd15"
+    }
+  },
+  
+  "default_negative_prompts": {
+    "general": "blurry, distorted, low quality, watermark, signature, text, bad anatomy, deformed",
+    "realistic": "cartoon, anime, illustration, painting, drawing, bad anatomy, deformed, blurry, low quality",
+    "anime": "realistic, photo, 3d render, bad anatomy, deformed hands, extra fingers, blurry",
+    "artistic": "bad quality, low resolution, blurry, watermark, signature"
+  },
+  
+  "aspect_ratios": {
+    "1:1": {"width": 1024, "height": 1024, "description": "Square"},
+    "16:9": {"width": 1344, "height": 768, "description": "Landscape Wide"},
+    "9:16": {"width": 768, "height": 1344, "description": "Portrait Tall"},
+    "4:3": {"width": 1152, "height": 896, "description": "Landscape"},
+    "3:4": {"width": 896, "height": 1152, "description": "Portrait"},
+    "3:2": {"width": 1248, "height": 832, "description": "Photo Landscape"},
+    "2:3": {"width": 832, "height": 1248, "description": "Photo Portrait"},
+    "21:9": {"width": 1536, "height": 640, "description": "Ultrawide"}
+  }
+}

@@ -135,6 +135,9 @@ class MessageHandler:
         self.user_charts = {}      # Will be cleaned up periodically
         self.max_user_files = 20   # Limit concurrent user files
         
+        # Store latest image URL per user (in-memory, refreshed from attachments)
+        self.user_latest_image_url = {}
+        
         # Tool mapping for API integration
         self.tool_mapping = {
             "google_search": self._google_search,
@@ -142,6 +145,7 @@ class MessageHandler:
             "execute_python_code": self._execute_python_code,
             "generate_image": self._generate_image,
             "edit_image": self._edit_image,
+            "remove_background": self._remove_background,
             "set_reminder": self._set_reminder,
             "get_reminders": self._get_reminders,
             "enhance_prompt": self._enhance_prompt,
@@ -199,6 +203,28 @@ class MessageHandler:
             if current_task in tasks:
                 return user_id
         return None
+    
+    async def _get_latest_image_url_from_db(self, user_id: int) -> str:
+        """Get the latest valid image URL from user's history in database"""
+        try:
+            # Get history from database (already filtered for expired images)
+            history = await self.db.get_history(user_id)
+            
+            # Find the latest image URL by iterating in reverse
+            for msg in reversed(history):
+                content = msg.get('content')
+                if isinstance(content, list):
+                    for item in reversed(content):
+                        if item.get('type') == 'image_url':
+                            image_url_data = item.get('image_url', {})
+                            url = image_url_data.get('url') if isinstance(image_url_data, dict) else None
+                            if url:
+                                logging.info(f"Found latest image URL from database: {url[:80]}...")
+                                return url
+            return None
+        except Exception as e:
+            logging.error(f"Error getting latest image URL from database: {e}")
+            return None
     
     def _count_tokens_with_tiktoken(self, text: str) -> int:
         """Count tokens using tiktoken encoder for internal operations."""
@@ -1366,13 +1392,16 @@ print("\\n=== Correlation Analysis ===")
                                 content.append({"type": "text", "text": f"[Error processing {attachment.filename}: {str(e)}]"})
                                 
                         elif any(attachment.filename.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                            # Store latest image URL for this user
+                            self.user_latest_image_url[user_id] = attachment.url
+                            logging.info(f"Stored latest image URL for user {user_id}")
+                            
                             content.append({
                                 "type": "image_url", 
                                 "image_url": {
                                     "url": attachment.url,
                                     "detail": "high"
-                                },
-                                "timestamp": datetime.now().isoformat()  # Add timestamp to track image expiration
+                                }
                             })
                         else:
                             content.append({"type": "text", "text": f"[Attachment: {attachment.filename}] - I can't process this type of file directly."})
@@ -2087,6 +2116,25 @@ print("\\n=== Correlation Analysis ===")
     async def _image_to_text(self, args: Dict[str, Any]):
         """Convert image to text"""
         try:
+            # Check if model passed "latest_image" - use stored URL
+            image_url = args.get("image_url", "")
+            if image_url == "latest_image" or not image_url:
+                user_id = self._find_user_id_from_current_task()
+                if user_id:
+                    # Try in-memory first (from current session), then database
+                    if user_id in self.user_latest_image_url:
+                        args["image_url"] = self.user_latest_image_url[user_id]
+                        logging.info(f"Using in-memory image URL for image_to_text")
+                    else:
+                        db_url = await self._get_latest_image_url_from_db(user_id)
+                        if db_url:
+                            args["image_url"] = db_url
+                            logging.info(f"Using database image URL for image_to_text")
+                        else:
+                            return json.dumps({"error": "No image found. Please upload an image first."})
+                else:
+                    return json.dumps({"error": "No image found. Please upload an image first."})
+            
             result = await self.image_generator.image_to_text(args)
             return result
         except Exception as e:
@@ -2096,15 +2144,82 @@ print("\\n=== Correlation Analysis ===")
     async def _upscale_image(self, args: Dict[str, Any]):
         """Upscale an image"""
         try:
+            # Check if model passed "latest_image" - use stored URL
+            image_url = args.get("image_url", "")
+            if image_url == "latest_image" or not image_url:
+                user_id = self._find_user_id_from_current_task()
+                if user_id:
+                    # Try in-memory first (from current session), then database
+                    if user_id in self.user_latest_image_url:
+                        args["image_url"] = self.user_latest_image_url[user_id]
+                        logging.info(f"Using in-memory image URL for upscale")
+                    else:
+                        db_url = await self._get_latest_image_url_from_db(user_id)
+                        if db_url:
+                            args["image_url"] = db_url
+                            logging.info(f"Using database image URL for upscale")
+                        else:
+                            return json.dumps({"error": "No image found. Please upload an image first."})
+                else:
+                    return json.dumps({"error": "No image found. Please upload an image first."})
+            
             result = await self.image_generator.upscale_image(args)
             return result
         except Exception as e:
             logging.error(f"Error in image upscaling: {str(e)}")
             return json.dumps({"error": f"Image upscaling failed: {str(e)}"})
     
+    async def _remove_background(self, args: Dict[str, Any]):
+        """Remove background from an image"""
+        try:
+            # Check if model passed "latest_image" - use stored URL
+            image_url = args.get("image_url", "")
+            if image_url == "latest_image" or not image_url:
+                user_id = self._find_user_id_from_current_task()
+                if user_id:
+                    # Try in-memory first (from current session), then database
+                    if user_id in self.user_latest_image_url:
+                        args["image_url"] = self.user_latest_image_url[user_id]
+                        logging.info(f"Using in-memory image URL for background removal")
+                    else:
+                        db_url = await self._get_latest_image_url_from_db(user_id)
+                        if db_url:
+                            args["image_url"] = db_url
+                            logging.info(f"Using database image URL for background removal")
+                        else:
+                            return json.dumps({"error": "No image found. Please upload an image first."})
+                else:
+                    return json.dumps({"error": "No image found. Please upload an image first."})
+            
+            result = await self.image_generator.remove_background(args)
+            return result
+        except Exception as e:
+            logging.error(f"Error in background removal: {str(e)}")
+            return json.dumps({"error": f"Background removal failed: {str(e)}"})
+    
     async def _photo_maker(self, args: Dict[str, Any]):
         """Create a photo"""
         try:
+            # Check if model passed "latest_image" in input_images - use stored URL
+            input_images = args.get("input_images", [])
+            if input_images and "latest_image" in input_images:
+                user_id = self._find_user_id_from_current_task()
+                if user_id:
+                    # Try in-memory first (from current session), then database
+                    if user_id in self.user_latest_image_url:
+                        url = self.user_latest_image_url[user_id]
+                        args["input_images"] = [url if img == "latest_image" else img for img in input_images]
+                        logging.info(f"Using in-memory image URL for photo_maker")
+                    else:
+                        db_url = await self._get_latest_image_url_from_db(user_id)
+                        if db_url:
+                            args["input_images"] = [db_url if img == "latest_image" else img for img in input_images]
+                            logging.info(f"Using database image URL for photo_maker")
+                        else:
+                            return json.dumps({"error": "No image found. Please upload an image first."})
+                else:
+                    return json.dumps({"error": "No image found. Please upload an image first."})
+            
             result = await self.image_generator.photo_maker(args)
             return result
         except Exception as e:

@@ -28,12 +28,11 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "edit_image",
-                "description": "Edit images (remove background). Returns URLs.",
+                "description": "Remove background from an image. Requires image_url from user's uploaded image or a web URL.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {"type": "string"},
-                        "operation": {"type": "string", "enum": ["remove_background"]}
+                        "image_url": {"type": "string", "description": "URL of the image to edit"}
                     },
                     "required": ["image_url"]
                 }
@@ -43,12 +42,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "enhance_prompt",
-                "description": "Create enhanced prompt versions.",
+                "description": "Improve and expand a prompt for better image generation results",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string"},
-                        "num_versions": {"type": "integer", "minimum": 1, "maximum": 5}
+                        "prompt": {"type": "string", "description": "The prompt to enhance"},
+                        "num_versions": {"type": "integer", "maximum": 5, "description": "Number of enhanced versions"}
                     },
                     "required": ["prompt"]
                 }
@@ -58,10 +57,10 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "image_to_text",
-                "description": "Convert image to text.",
+                "description": "Generate a text description/caption of an image or extract text via OCR. When user uploads an image, pass 'latest_image' as image_url - the system will use the most recent uploaded image.",
                 "parameters": {
                     "type": "object",
-                    "properties": {"image_url": {"type": "string"}},
+                    "properties": {"image_url": {"type": "string", "description": "Pass 'latest_image' to use the user's most recently uploaded image"}},
                     "required": ["image_url"]
                 }
             }
@@ -70,12 +69,13 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function", 
             "function": {
                 "name": "upscale_image",
-                "description": "Upscale image resolution. Returns URLs.",
+                "description": "Enlarge/upscale an image to higher resolution. When user uploads an image and wants to upscale it, pass 'latest_image' as the image_url - the system will use the most recent uploaded image.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "image_url": {"type": "string"},
-                        "scale_factor": {"type": "integer", "enum": [2, 3, 4]}
+                        "image_url": {"type": "string", "description": "Pass 'latest_image' to use the user's most recently uploaded image"},
+                        "scale_factor": {"type": "integer", "enum": [2, 4], "description": "Scale factor (2 or 4)"},
+                        "model": {"type": "string", "enum": ["clarity", "ccsr", "sd-latent", "swinir"], "description": "Upscale model to use"}
                     },
                     "required": ["image_url"]
                 }
@@ -85,14 +85,15 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "photo_maker",
-                "description": "Generate images from reference photos. Returns URLs.",
+                "description": "Generate new images based on reference photos. When user uploads an image and wants to use it as reference, pass ['latest_image'] as input_images - the system will use the most recent uploaded image.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string"},
-                        "input_images": {"type": "array", "items": {"type": "string"}},
-                        "strength": {"type": "integer", "minimum": 1, "maximum": 100},
-                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4}
+                        "prompt": {"type": "string", "description": "Description of the desired output image"},
+                        "input_images": {"type": "array", "items": {"type": "string"}, "description": "Pass ['latest_image'] to use the user's most recently uploaded image"},
+                        "style": {"type": "string", "description": "Style to apply (e.g., 'Photographic', 'Cinematic', 'Anime')"},
+                        "strength": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Reference image influence (0-100)"},
+                        "num_images": {"type": "integer", "maximum": 4, "description": "Number of images to generate"}
                     },
                     "required": ["prompt", "input_images"]
                 }
@@ -102,13 +103,14 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image_with_refiner",
-                "description": "Generate high-quality images. Returns URLs.",
+                "description": "Generate high-quality refined images with extra detail using SDXL refiner. Best for detailed artwork.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string"},
-                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4},
-                        "negative_prompt": {"type": "string"}
+                        "prompt": {"type": "string", "description": "Detailed description of the image to generate"},
+                        "model": {"type": "string", "enum": ["sdxl", "flux", "realistic"], "description": "Base model to use"},
+                        "num_images": {"type": "integer", "maximum": 4, "description": "Number of images to generate"},
+                        "negative_prompt": {"type": "string", "description": "Things to avoid in the image"}
                     },
                     "required": ["prompt"]
                 }
@@ -117,13 +119,28 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "remove_background",
+                "description": "Remove background from an image. When user uploads an image and wants to remove its background, pass 'latest_image' as the image_url - the system will use the most recent uploaded image.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "image_url": {"type": "string", "description": "Pass 'latest_image' to use the user's most recently uploaded image"},
+                        "model": {"type": "string", "enum": ["bria", "rembg", "birefnet-base", "birefnet-general", "birefnet-portrait"], "description": "Background removal model"}
+                    },
+                    "required": ["image_url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "google_search",
-                "description": "Search web for current information.",
+                "description": "Search the web for current information",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "num_results": {"type": "integer", "minimum": 1, "maximum": 10}
+                        "num_results": {"type": "integer", "maximum": 10}
                     },
                     "required": ["query"]
                 }
@@ -133,10 +150,10 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "scrape_webpage",
-                "description": "Extract content from webpage.",
+                "description": "Extract and read content from a webpage URL",
                 "parameters": {
                     "type": "object",
-                    "properties": {"url": {"type": "string"}},
+                    "properties": {"url": {"type": "string", "description": "The webpage URL to scrape"}},
                     "required": ["url"]
                 }
             }
@@ -145,12 +162,20 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "generate_image",
-                "description": "Generate images from text. Returns URLs.",
+                "description": "Create/generate images from text. Models: flux (best), flux-dev, sdxl, realistic (photos), anime, dreamshaper. Supports aspect ratios.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "prompt": {"type": "string"},
-                        "num_images": {"type": "integer", "minimum": 1, "maximum": 4}
+                        "prompt": {"type": "string", "description": "Detailed description of the image to create"},
+                        "model": {"type": "string", "enum": ["flux", "flux-dev", "sdxl", "realistic", "anime", "dreamshaper"], "description": "Model to use for generation"},
+                        "num_images": {"type": "integer", "maximum": 4, "description": "Number of images (1-4)"},
+                        "aspect_ratio": {"type": "string", "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"], "description": "Aspect ratio preset"},
+                        "width": {"type": "integer", "description": "Custom width (512-2048, divisible by 64)"},
+                        "height": {"type": "integer", "description": "Custom height (512-2048, divisible by 64)"},
+                        "negative_prompt": {"type": "string", "description": "Things to avoid in the image"},
+                        "steps": {"type": "integer", "minimum": 10, "maximum": 50, "description": "Inference steps (more = higher quality)"},
+                        "cfg_scale": {"type": "number", "minimum": 1, "maximum": 20, "description": "Guidance scale (higher = more prompt adherence)"},
+                        "seed": {"type": "integer", "description": "Random seed for reproducibility"}
                     },
                     "required": ["prompt"]
                 }
@@ -160,33 +185,12 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",            
             "function": {
                 "name": "execute_python_code",
-                "description": """Execute Python with AUTO-INSTALL. Packages (pandas, numpy, matplotlib, seaborn, sklearn, plotly, opencv, etc.) install automatically when imported. Just use 'import' normally. Generated files (CSV, images, JSON) auto-captured and sent to user (stored 48h). Load user files: load_file('file_id'). Example: import pandas as pd; df=load_file('id'); df.to_csv('out.csv')""",
+                "description": "Run Python code. Packages auto-install. Use load_file('file_id') for user files. Output files auto-sent to user.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "Python code to execute. Import any approved package - they auto-install!"
-                        },
-                        "input_data": {
-                            "type": "string",
-                            "description": "Optional input data (DEPRECATED - use load_file() in code instead)"
-                        },
-                        "install_packages": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "OPTIONAL: Pre-install packages. Usually not needed as packages auto-install on import."
-                        },
-                        "enable_visualization": {
-                            "type": "boolean",
-                            "description": "DEPRECATED: Just use plt.savefig() to create images"
-                        },
-                        "timeout": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 300,
-                            "description": "Execution timeout in seconds (default: 60)"
-                        }
+                        "code": {"type": "string", "description": "Python code to execute"},
+                        "timeout": {"type": "integer", "maximum": 300, "description": "Timeout in seconds"}
                     },
                     "required": ["code"]
                 }
@@ -196,7 +200,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "set_reminder",
-                "description": "Set user reminder with flexible time formats.",
+                "description": "Set reminder",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -211,7 +215,7 @@ def get_tools_for_model() -> List[Dict[str, Any]]:
             "type": "function", 
             "function": {
                 "name": "get_reminders",
-                "description": "Get user reminders list.",
+                "description": "List reminders",
                 "parameters": {"type": "object", "properties": {}}
             }
         }

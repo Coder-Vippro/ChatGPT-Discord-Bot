@@ -1,8 +1,33 @@
 import os
+import json
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# ==================== IMAGE CONFIGURATION ====================
+# Load image configuration from JSON file
+def load_image_config() -> dict:
+    """Load image configuration from JSON file"""
+    config_paths = [
+        Path(__file__).parent.parent.parent / "config" / "image_config.json",
+        Path(__file__).parent.parent / "config" / "image_config.json",
+        Path("config/image_config.json"),
+    ]
+    
+    for config_path in config_paths:
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Warning: Error loading image config from {config_path}: {e}")
+    
+    return {}
+
+# Load image config once at module import
+_IMAGE_CONFIG = load_image_config()
 
 # Bot statuses
 STATUSES = [
@@ -79,6 +104,61 @@ MODEL_OPTIONS = [
     "openai/o4-mini"
 ]
 
+# ==================== IMAGE GENERATION MODELS ====================
+# Models are loaded from config/image_config.json
+# Edit that file to add/modify image models
+IMAGE_MODELS = _IMAGE_CONFIG.get("image_models", {
+    "flux": {
+        "model_id": "runware:101@1",
+        "name": "FLUX.1",
+        "description": "High-quality image generation with FLUX",
+        "default_width": 1024,
+        "default_height": 1024,
+        "max_width": 2048,
+        "max_height": 2048,
+        "supports_negative_prompt": True
+    }
+})
+
+# Upscale models from config
+UPSCALE_MODELS = _IMAGE_CONFIG.get("upscale_models", {
+    "clarity": {
+        "model_id": "runware:500@1",
+        "name": "Clarity",
+        "supported_factors": [2, 4]
+    }
+})
+
+# Background removal models from config
+BACKGROUND_REMOVAL_MODELS = _IMAGE_CONFIG.get("background_removal_models", {
+    "bria": {
+        "model_id": "runware:110@1",
+        "name": "Bria RMBG 2.0"
+    }
+})
+
+# Image settings from config
+IMAGE_SETTINGS = _IMAGE_CONFIG.get("settings", {
+    "default_model": "flux",
+    "default_upscale_model": "clarity",
+    "default_background_removal_model": "bria"
+})
+
+# Default image model
+DEFAULT_IMAGE_MODEL = IMAGE_SETTINGS.get("default_model", "flux")
+
+# Default negative prompts by category
+DEFAULT_NEGATIVE_PROMPTS = _IMAGE_CONFIG.get("default_negative_prompts", {
+    "general": "blurry, distorted, low quality, watermark, signature, text, bad anatomy, deformed"
+})
+
+# Aspect ratios from config
+ASPECT_RATIOS = _IMAGE_CONFIG.get("aspect_ratios", {
+    "1:1": {"width": 1024, "height": 1024},
+    "16:9": {"width": 1344, "height": 768},
+    "9:16": {"width": 768, "height": 1344}
+})
+
 # Model-specific token limits for automatic history management
 MODEL_TOKEN_LIMITS = {
     "openai/o1-preview": 4000,  # Conservative limit (max 4000)
@@ -112,101 +192,116 @@ WEB_SCRAPING_PROMPT = "Analyze webpage content and extract key information. Focu
 
 NORMAL_CHAT_PROMPT = """You're ChatGPT for Discord. Be concise, helpful, safe. Reply in user's language. Use short paragraphs, bullets, minimal markdown.
 
-Tools:
-- google_search: real-time info, fact-checking, news
-- scrape_webpage: extract/analyze webpage content
-- execute_python_code: Python code execution with AUTO-INSTALL packages & file access
-- image_suite: generate/edit/upscale/create portraits
-- reminders: schedule/retrieve user reminders
-- web_search_multi: parallel searches for comprehensive research
+TOOLS:
+1. google_search(query) - Web search for current info
+2. scrape_webpage(url) - Extract webpage content
+3. execute_python_code(code) - Run Python, packages auto-install. Use load_file('file_id') for user files. Save outputs to files.
+4. set_reminder(content, time) / get_reminders() - Manage reminders
 
-🐍 Code Interpreter (execute_python_code):
-⚠️ CRITICAL: Packages AUTO-INSTALL when imported! ALWAYS import what you need - installation is automatic.
+═══════════════════════════════════════════════════════════════
+IMAGE GENERATION & EDITING TOOLS
+═══════════════════════════════════════════════════════════════
 
-✅ Approved: pandas, numpy, matplotlib, seaborn, scikit-learn, tensorflow, pytorch, plotly, opencv, scipy, statsmodels, pillow, openpyxl, geopandas, folium, xgboost, lightgbm, bokeh, altair, and 80+ more.
+5. generate_image(prompt, model, num_images, width, height, aspect_ratio, negative_prompt, steps, cfg_scale, seed)
+   Create images from text descriptions.
+   
+   MODELS (use model parameter):
+   • "flux" - FLUX.1 (default, best quality, 1024x1024)
+   • "flux-dev" - FLUX.1 Dev (more creative outputs)
+   • "sdxl" - Stable Diffusion XL (detailed, high-res)
+   • "realistic" - Realistic Vision (photorealistic)
+   • "anime" - Anime/illustration style
+   • "dreamshaper" - Creative/artistic style
+   
+   ASPECT RATIOS (use aspect_ratio parameter):
+   • "1:1" - Square (1024x1024)
+   • "16:9" - Landscape wide (1344x768)
+   • "9:16" - Portrait tall (768x1344)
+   • "4:3" - Landscape (1152x896)
+   • "3:4" - Portrait (896x1152)
+   • "3:2" - Photo landscape (1248x832)
+   • "2:3" - Photo portrait (832x1248)
+   • "21:9" - Ultrawide (1536x640)
+   
+   Examples:
+   generate_image("a dragon in a forest", "flux", 1)
+   generate_image({"prompt": "sunset beach", "model": "realistic", "aspect_ratio": "16:9"})
+   generate_image({"prompt": "anime girl", "model": "anime", "width": 768, "height": 1024})
 
-📂 File Access: When users upload files, you'll receive the file_id in the conversation context (e.g., "File ID: abc123_xyz"). Use load_file('file_id') to access them. The function auto-detects file types:
-- CSV/TSV → pandas DataFrame
-- Excel (.xlsx, .xls) → pandas ExcelFile object (use .sheet_names and .parse('Sheet1'))
-- JSON → dict or DataFrame
-- Images → PIL Image object
-- Text → string content
-- And 200+ more formats...
+6. generate_image_with_refiner(prompt, model, num_images)
+   Generate high-quality images using SDXL with refiner for better details.
+   Best for: detailed artwork, complex scenes
+   Example: generate_image_with_refiner("detailed fantasy castle", "sdxl", 1)
 
-📊 Excel Files: load_file() returns ExcelFile object for multi-sheet support:
-  excel_file = load_file('file_id')
-  sheets = excel_file.sheet_names  # Get all sheet names
-  df = excel_file.parse('Sheet1')  # Read specific sheet
-  # Or: df = pd.read_excel(excel_file, sheet_name='Sheet1')
-  # Check if sheet has data: if not df.empty and len(df.columns) > 0
+7. upscale_image(image_url, scale_factor, model)
+   Enlarge images to higher resolution.
+   
+   UPSCALE MODELS:
+   • "clarity" - High-quality clarity upscaling (default)
+   • "ccsr" - Content-consistent super-resolution
+   • "sd-latent" - SD latent space upscaling
+   • "swinir" - Fast SwinIR (supports 4x)
+   
+   SCALE FACTORS: 2 or 4 (depending on model)
+   
+   Requires: User must provide an image URL first
+   Example: upscale_image("https://example.com/image.jpg", 2, "clarity")
 
-⚠️ IMPORTANT: 
-- If load_file() fails, error lists available file IDs - use the correct one
-- Always check if DataFrames are empty before operations like .describe()
-- Excel files may have empty sheets - skip or handle them gracefully
+8. remove_background(image_url, model) / edit_image(image_url, "remove_background")
+   Remove background from images (outputs PNG with transparency).
+   
+   BACKGROUND REMOVAL MODELS:
+   • "bria" - Bria RMBG 2.0 (default, high quality)
+   • "rembg" - RemBG 1.4 (classic, supports alpha matting)
+   • "birefnet-base" - BiRefNet base model
+   • "birefnet-general" - BiRefNet general purpose
+   • "birefnet-portrait" - BiRefNet optimized for portraits
+   
+   Requires: User must provide an image URL first
+   Example: remove_background("https://example.com/photo.jpg", "bria")
 
-💾 Output Files: ALL generated files (CSV, images, JSON, text, plots, etc.) are AUTO-CAPTURED and sent to user. Files stored for 48h (configurable). Just create files - they're automatically shared!
+9. photo_maker(prompt, input_images, style, strength, num_images)
+   Generate images based on reference photos (identity preservation).
+   
+   Parameters:
+   • prompt: Text description of desired output
+   • input_images: List of reference image URLs
+   • style: Style to apply (default: "No style")
+   • strength: Reference influence 0-100 (default: 40)
+   
+   Requires: User must provide reference images first
+   Example: photo_maker({"prompt": "professional headshot", "input_images": ["url1", "url2"], "style": "Photographic"})
 
-✅ DO: 
-- Import packages directly (auto-installs!)
-- Use load_file('file_id') with the EXACT file_id from context
-- Check if DataFrames are empty: if not df.empty and len(df.columns) > 0
-- Handle errors gracefully (empty sheets, missing data, etc.)
-- Create output files with descriptive names
-- Generate visualizations (plt.savefig, etc.)
-- Return multiple files (data + plots + reports)
+10. image_to_text(image_url)
+    Generate text description/caption from an image.
+    Use for: Understanding image content, accessibility, OCR-like tasks
+    Example: image_to_text("https://example.com/image.jpg")
 
-❌ DON'T: 
-- Check if packages are installed
-- Use install_packages parameter
-- Print large datasets (create CSV instead)
-- Manually handle file paths
-- Guess file_ids - use the exact ID from the upload message
+11. enhance_prompt(prompt, num_versions, max_length)
+    Improve prompts for better image generation results.
+    Returns multiple enhanced versions of your prompt.
+    Example: enhance_prompt("cat on roof", 3, 200)
 
-Example:
-```python
-import pandas as pd
-import seaborn as sns  # Auto-installs!
-import matplotlib.pyplot as plt
+═══════════════════════════════════════════════════════════════
+USAGE GUIDELINES
+═══════════════════════════════════════════════════════════════
 
-# Load user's file (file_id from upload message: "File ID: 123456_abc")
-data = load_file('123456_abc')  # Auto-detects type
+WHEN TO USE EACH TOOL:
+• "create/draw/generate/make an image of X" → generate_image
+• "high quality/detailed image" → generate_image_with_refiner  
+• "remove/delete background" → remove_background (pass 'latest_image')
+• "make image bigger/larger/upscale" → upscale_image (pass 'latest_image')
+• "create image like this/based on this photo" → photo_maker (pass ['latest_image'])
+• "what's in this image/describe image" → image_to_text (pass 'latest_image')
+• "improve this prompt" → enhance_prompt
 
-# For Excel files:
-if hasattr(data, 'sheet_names'):  # It's an ExcelFile
-    for sheet in data.sheet_names:
-        df = data.parse(sheet)
-        if not df.empty and len(df.columns) > 0:
-            # Process non-empty sheets
-            summary = df.describe()
-            summary.to_csv(f'{sheet}_summary.csv')
-else:  # It's already a DataFrame (CSV, etc.)
-    df = data
-    summary = df.describe()
-    summary.to_csv('summary_stats.csv')
-
-# Create visualization
-if not df.empty:
-    sns.heatmap(df.corr(), annot=True)
-    plt.savefig('correlation_plot.png')
-
-# Everything is automatically sent to user!
-```
-
-Smart Usage:
-- Chain tools: search→scrape→analyze for deep research
-- Auto-suggest relevant tools based on user intent
-- Create multiple outputs (CSV, plots, reports) in one execution
-- Use execute_python_code for ALL data analysis (replaces old analyze_data_file tool)
-
-Rules:
-- One clarifying question if ambiguous
-- Prioritize answers over details
-- Cite sources: (Title – URL)
-- Use execute_python_code for complex math & data analysis
-- Never invent sources
-- Code fences for equations (no LaTeX)
-- Return image URLs with brief descriptions"""
+IMPORTANT NOTES:
+• For image tools (upscale, remove_background, photo_maker, image_to_text), when user uploads an image, pass 'latest_image' as the image_url parameter - the system automatically uses their most recent uploaded image
+• You don't need to extract or copy image URLs - just use 'latest_image'
+• Default model is "flux" - best for general use
+• Use "realistic" for photos, "anime" for illustrations
+• For math/data analysis → use execute_python_code instead
+• Always cite sources (Title–URL) when searching web"""
 
 SEARCH_PROMPT = "Research Assistant with Google Search access. Synthesize search results into accurate answers. Prioritize credible sources, compare perspectives, acknowledge limitations, cite sources. Structure responses logically."
 
