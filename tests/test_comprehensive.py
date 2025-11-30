@@ -692,6 +692,488 @@ class TestMonitoring:
         assert not status.checks["api"]["healthy"]
 
 
+
+
+# ============================================================
+# Image Utils Module Tests
+# ============================================================
+
+class TestImageUtils:
+    """Tests for the image utilities module."""
+    
+    @pytest.fixture
+    def image_generator(self):
+        """Create a mock ImageGenerator instance."""
+        with patch('src.utils.image_utils.Runware'):
+            from src.utils.image_utils import ImageGenerator
+            generator = ImageGenerator(api_key="test_key")
+            return generator
+    
+    def test_url_validation_valid_http(self, image_generator):
+        """Test URL validation with valid HTTP URLs."""
+        valid, msg = image_generator._validate_url("http://example.com/image.jpg")
+        assert valid is True
+        assert msg == "OK"
+    
+    def test_url_validation_valid_https(self, image_generator):
+        """Test URL validation with valid HTTPS URLs."""
+        valid, msg = image_generator._validate_url("https://example.com/image.png")
+        assert valid is True
+        assert msg == "OK"
+    
+    def test_url_validation_invalid_scheme(self, image_generator):
+        """Test URL validation rejects invalid schemes."""
+        valid, msg = image_generator._validate_url("ftp://example.com/image.jpg")
+        assert valid is False
+        assert "Invalid URL scheme" in msg
+    
+    def test_url_validation_no_url(self, image_generator):
+        """Test URL validation with no URL provided."""
+        valid, msg = image_generator._validate_url("")
+        assert valid is False
+        assert "No URL provided" in msg
+    
+    def test_url_validation_none(self, image_generator):
+        """Test URL validation with None."""
+        valid, msg = image_generator._validate_url(None)
+        assert valid is False
+        assert "No URL provided" in msg
+    
+    def test_url_validation_image_extensions(self, image_generator):
+        """Test URL validation recognizes various image extensions."""
+        extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tiff']
+        for ext in extensions:
+            valid, msg = image_generator._validate_url(f"https://example.com/test{ext}")
+            assert valid is True, f"Failed for extension {ext}"
+    
+    def test_url_validation_known_hosts(self, image_generator):
+        """Test URL validation recognizes known image hosting services."""
+        hosts = [
+            'cdn.discordapp.com',
+            'media.discordapp.net',
+            'i.imgur.com',
+            'imgur.com',
+            'cloudinary.com',
+            'unsplash.com',
+            'pexels.com',
+            'runware.ai',
+            'replicate.delivery'
+        ]
+        for host in hosts:
+            valid, msg = image_generator._validate_url(f"https://{host}/image123")
+            assert valid is True, f"Failed for host {host}"
+    
+    def test_url_validation_with_query_params(self, image_generator):
+        """Test URL validation with query parameters."""
+        valid, msg = image_generator._validate_url("https://example.com/api/image?id=123&format=png")
+        assert valid is True
+    
+    @pytest.mark.asyncio
+    async def test_download_image_discord_cdn_url_detection_lowercase(self, image_generator):
+        """Test that Discord CDN URLs are detected correctly (lowercase)."""
+        test_url = "https://cdn.discordapp.com/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', 'test_token'):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            # Verify the Authorization header was added
+            call_args = mock_get.call_args
+            assert call_args is not None
+            headers = call_args[1]['headers']
+            assert 'Authorization' in headers
+            assert headers['Authorization'] == 'Bot test_token'
+    
+    @pytest.mark.asyncio
+    async def test_download_image_discord_cdn_url_detection_uppercase(self, image_generator):
+        """Test that Discord CDN URLs are detected with uppercase hostname."""
+        test_url = "https://CDN.DISCORDAPP.COM/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', 'test_token'):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            # Verify the Authorization header was added despite uppercase
+            call_args = mock_get.call_args
+            assert call_args is not None
+            headers = call_args[1]['headers']
+            assert 'Authorization' in headers
+            assert headers['Authorization'] == 'Bot test_token'
+    
+    @pytest.mark.asyncio
+    async def test_download_image_discord_cdn_mixed_case(self, image_generator):
+        """Test Discord CDN detection with mixed case hostname."""
+        test_url = "https://CdN.DiScOrDaPp.CoM/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', 'test_token'):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            assert 'Authorization' in headers
+    
+    @pytest.mark.asyncio
+    async def test_download_image_media_discordapp_net(self, image_generator):
+        """Test that media.discordapp.net URLs are also detected."""
+        test_url = "https://media.discordapp.net/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', 'test_token'):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            assert 'Authorization' in headers
+            assert headers['Authorization'] == 'Bot test_token'
+    
+    @pytest.mark.asyncio
+    async def test_download_image_non_discord_url_no_auth_header(self, image_generator):
+        """Test that non-Discord URLs don't get Authorization header."""
+        test_url = "https://example.com/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            # Should NOT have Authorization header for non-Discord URLs
+            assert 'Authorization' not in headers
+    
+    @pytest.mark.asyncio
+    async def test_download_image_discord_url_no_token(self, image_generator):
+        """Test Discord URL handling when no token is available."""
+        test_url = "https://cdn.discordapp.com/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', None):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            # Should NOT have Authorization header when token is None
+            assert 'Authorization' not in headers
+    
+    @pytest.mark.asyncio
+    async def test_download_image_discord_url_with_subdomain(self, image_generator):
+        """Test that subdomains of Discord CDN are not matched."""
+        test_url = "https://fake.cdn.discordapp.com/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            # Should NOT match fake subdomain
+            assert 'Authorization' not in headers
+    
+    @pytest.mark.asyncio
+    async def test_download_image_url_with_port(self, image_generator):
+        """Test URL parsing with port number."""
+        test_url = "https://cdn.discordapp.com:443/attachments/123/456/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            with patch('src.utils.image_utils.DISCORD_TOKEN', 'test_token'):
+                result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            call_args = mock_get.call_args
+            headers = call_args[1]['headers']
+            assert 'Authorization' in headers
+    
+    @pytest.mark.asyncio
+    async def test_download_image_invalid_url_returns_none(self, image_generator):
+        """Test that invalid URLs return None."""
+        result = await image_generator._download_image("not-a-valid-url")
+        assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_download_image_404_response(self, image_generator):
+        """Test handling of 404 responses."""
+        test_url = "https://example.com/missing.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 404
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_download_image_403_response(self, image_generator):
+        """Test handling of 403 responses."""
+        test_url = "https://example.com/forbidden.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 403
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_download_image_network_error(self, image_generator):
+        """Test handling of network errors."""
+        test_url = "https://example.com/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get.side_effect = aiohttp.ClientError("Network error")
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_download_image_generic_exception(self, image_generator):
+        """Test handling of generic exceptions."""
+        test_url = "https://example.com/image.png"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get.side_effect = Exception("Unexpected error")
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            assert result is None
+    
+    @pytest.mark.asyncio
+    async def test_download_image_url_with_whitespace(self, image_generator):
+        """Test that URLs with leading/trailing whitespace are handled."""
+        test_url = "  https://example.com/image.png  "
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'image/png'}
+            mock_response.read = AsyncMock(return_value=b"fake_image_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            result = await image_generator._download_image(test_url)
+            
+            assert result == b"fake_image_data"
+            # Verify that the URL was stripped before being used
+            call_args = mock_get.call_args
+            assert call_args[0][0] == test_url.strip()
+    
+    @pytest.mark.asyncio
+    async def test_download_image_content_type_warning(self, image_generator):
+        """Test warning when content type is not image."""
+        test_url = "https://example.com/file.pdf"
+        
+        with patch('aiohttp.ClientSession') as mock_session:
+            mock_response = AsyncMock()
+            mock_response.status = 200
+            mock_response.headers = {'Content-Type': 'application/pdf'}
+            mock_response.read = AsyncMock(return_value=b"fake_pdf_data")
+            
+            mock_get = AsyncMock(return_value=mock_response)
+            mock_get.__aenter__ = AsyncMock(return_value=mock_response)
+            mock_get.__aexit__ = AsyncMock(return_value=None)
+            
+            mock_session_instance = AsyncMock()
+            mock_session_instance.get = mock_get
+            mock_session_instance.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_session.return_value = mock_session_instance
+            
+            # Should still return data but log warning
+            result = await image_generator._download_image(test_url)
+            assert result == b"fake_pdf_data"
+    
+    def test_load_image_config_default(self):
+        """Test loading default image config when file not found."""
+        from src.utils.image_utils import get_default_config
+        
+        config = get_default_config()
+        
+        assert "settings" in config
+        assert "image_models" in config
+        assert "upscale_models" in config
+        assert config["settings"]["default_model"] == "flux"
+    
+    def test_get_available_models(self, image_generator):
+        """Test getting available models."""
+        models = image_generator.get_available_models()
+        
+        assert isinstance(models, dict)
+        assert len(models) > 0
+    
+    def test_get_model_info_valid(self, image_generator):
+        """Test getting info for a valid model."""
+        # Assuming 'flux' is in default config
+        info = image_generator.get_model_info("flux")
+        
+        if info:  # May not exist in all configs
+            assert isinstance(info, dict)
+            assert "model_id" in info or "name" in info
+    
+    def test_get_model_info_invalid(self, image_generator):
+        """Test getting info for an invalid model returns None."""
+        info = image_generator.get_model_info("nonexistent_model_xyz")
+        assert info is None
+
+
 # ============================================================
 # Integration Tests (require environment setup)
 # ============================================================
