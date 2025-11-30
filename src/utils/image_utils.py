@@ -841,7 +841,9 @@ class ImageGenerator:
             }
             
             # For Discord CDN URLs, add bot authorization if available
-            if 'cdn.discordapp.com' in url or 'media.discordapp.net' in url:
+            from urllib.parse import urlparse
+            host = urlparse(url).hostname or ""
+            if host.lower() in ('cdn.discordapp.com', 'media.discordapp.net'):
                 try:
                     from src.config.config import DISCORD_TOKEN
                     if DISCORD_TOKEN:
