@@ -5,7 +5,7 @@ import logging
 import time
 import functools
 import concurrent.futures
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import io
 import aiohttp
 import os
@@ -19,31 +19,15 @@ from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
 from src.config.config import PDF_ALLOWED_MODELS, MODEL_TOKEN_LIMITS, DEFAULT_TOKEN_LIMIT, DEFAULT_MODEL
+from src.config.pricing import MODEL_PRICING, calculate_cost, format_cost
+from src.utils.validators import validate_message_content, validate_prompt, sanitize_for_logging
+from src.utils.discord_utils import send_long_message, create_error_embed, create_progress_embed
 
 # Global task and rate limiting tracking
-user_tasks = {}
-user_last_request = {}
+user_tasks: Dict[int, Dict] = {}
+user_last_request: Dict[int, List[float]] = {}
 RATE_LIMIT_WINDOW = 5  # seconds
 MAX_REQUESTS = 3  # max requests per window
-
-# Model pricing per 1M tokens (in USD)
-MODEL_PRICING = {
-    "openai/gpt-4o": {"input": 5.00, "output": 20.00},
-    "openai/gpt-4o-mini": {"input": 0.60, "output": 2.40},
-    "openai/gpt-4.1": {"input": 2.00, "output": 8.00},
-    "openai/gpt-4.1-mini": {"input": 0.40, "output": 1.60},
-    "openai/gpt-4.1-nano": {"input": 0.10, "output": 0.40},
-    "openai/gpt-5": {"input": 1.25, "output": 10.00},
-    "openai/gpt-5-mini": {"input": 0.25, "output": 2.00},
-    "openai/gpt-5-nano": {"input": 0.05, "output": 0.40},
-    "openai/gpt-5-chat": {"input": 1.25, "output": 10.00},
-    "openai/o1-preview": {"input": 15.00, "output": 60.00},
-    "openai/o1-mini": {"input": 1.10, "output": 4.40},
-    "openai/o1": {"input": 15.00, "output": 60.00},
-    "openai/o3-mini": {"input": 1.10, "output": 4.40},
-    "openai/o3": {"input": 2.00, "output": 8.00},
-    "openai/o4-mini": {"input": 2.00, "output": 8.00}
-}
 
 # File extensions that should be treated as text files
 TEXT_FILE_EXTENSIONS = [
@@ -1598,13 +1582,11 @@ print("\\n=== Correlation Analysis ===")
                 output_tokens = getattr(response.usage, 'completion_tokens', 0)
                 
                 # Calculate cost based on model pricing
-                if model in MODEL_PRICING:
-                    pricing = MODEL_PRICING[model]
-                    input_cost = (input_tokens / 1_000_000) * pricing["input"]
-                    output_cost = (output_tokens / 1_000_000) * pricing["output"]
-                    total_cost = input_cost + output_cost
+                pricing = MODEL_PRICING.get(model)
+                if pricing:
+                    total_cost = pricing.calculate_cost(input_tokens, output_tokens)
                     
-                    logging.info(f"API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: ${total_cost:.6f}")
+                    logging.info(f"API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: {format_cost(total_cost)}")
                     
                     # Save token usage and cost to database
                     await self.db.save_token_usage(user_id, model, input_tokens, output_tokens, total_cost)
@@ -1704,14 +1686,12 @@ print("\\n=== Correlation Analysis ===")
                         output_tokens += follow_up_output_tokens
                         
                         # Calculate additional cost
-                        if model in MODEL_PRICING:
-                            pricing = MODEL_PRICING[model]
-                            additional_input_cost = (follow_up_input_tokens / 1_000_000) * pricing["input"]
-                            additional_output_cost = (follow_up_output_tokens / 1_000_000) * pricing["output"]
-                            additional_cost = additional_input_cost + additional_output_cost
+                        pricing = MODEL_PRICING.get(model)
+                        if pricing:
+                            additional_cost = pricing.calculate_cost(follow_up_input_tokens, follow_up_output_tokens)
                             total_cost += additional_cost
                             
-                            logging.info(f"Follow-up API call - Model: {model}, Input tokens: {follow_up_input_tokens}, Output tokens: {follow_up_output_tokens}, Additional cost: ${additional_cost:.6f}")
+                            logging.info(f"Follow-up API call - Model: {model}, Input tokens: {follow_up_input_tokens}, Output tokens: {follow_up_output_tokens}, Additional cost: {format_cost(additional_cost)}")
                             
                             # Save additional token usage and cost to database
                             await self.db.save_token_usage(user_id, model, follow_up_input_tokens, follow_up_output_tokens, additional_cost)
@@ -1791,7 +1771,7 @@ print("\\n=== Correlation Analysis ===")
             
             # Log processing time and cost for performance monitoring
             processing_time = time.time() - start_time
-            logging.info(f"Message processed in {processing_time:.2f} seconds (User: {user_id}, Model: {model}, Cost: ${total_cost:.6f})")
+            logging.info(f"Message processed in {processing_time:.2f} seconds (User: {user_id}, Model: {model}, Cost: {format_cost(total_cost)})")
             
         except asyncio.CancelledError:
             # Handle cancellation cleanly

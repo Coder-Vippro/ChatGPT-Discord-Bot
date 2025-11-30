@@ -7,36 +7,67 @@ import asyncio
 from typing import Optional, Dict, List, Any, Callable
 
 from src.config.config import MODEL_OPTIONS, PDF_ALLOWED_MODELS, DEFAULT_MODEL
+from src.config.pricing import MODEL_PRICING, calculate_cost, format_cost
 from src.utils.image_utils import ImageGenerator
 from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.openai_utils import prepare_file_from_path
 from src.utils.token_counter import token_counter
 from src.utils.code_interpreter import delete_all_user_files
-
-# Model pricing per 1M tokens (in USD)
-MODEL_PRICING = {
-    "openai/gpt-4o": {"input": 5.00, "output": 20.00},
-    "openai/gpt-4o-mini": {"input": 0.60, "output": 2.40},
-    "openai/gpt-4.1": {"input": 2.00, "output": 8.00},
-    "openai/gpt-4.1-mini": {"input": 0.40, "output": 1.60},
-    "openai/gpt-4.1-nano": {"input": 0.10, "output": 0.40},
-    "openai/gpt-5": {"input": 1.25, "output": 10.00},
-    "openai/gpt-5-mini": {"input": 0.25, "output": 2.00},
-    "openai/gpt-5-nano": {"input": 0.05, "output": 0.40},
-    "openai/gpt-5-chat": {"input": 1.25, "output": 10.00},
-    "openai/o1-preview": {"input": 15.00, "output": 60.00},
-    "openai/o1-mini": {"input": 1.10, "output": 4.40},
-    "openai/o1": {"input": 15.00, "output": 60.00},
-    "openai/o3-mini": {"input": 1.10, "output": 4.40},
-    "openai/o3": {"input": 2.00, "output": 8.00},
-    "openai/o4-mini": {"input": 2.00, "output": 8.00}
-}
+from src.utils.discord_utils import create_info_embed, create_error_embed, create_success_embed
 
 # Dictionary to keep track of user requests and their cooldowns
-user_requests = {}
+user_requests: Dict[int, Dict[str, Any]] = {}
 # Dictionary to store user tasks
-user_tasks = {}
+user_tasks: Dict[int, List] = {}
+
+
+# ============================================================
+# Autocomplete Functions
+# ============================================================
+
+async def model_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    """
+    Autocomplete function for model selection.
+    Provides filtered model suggestions based on user input.
+    """
+    # Filter models based on current input
+    matches = [
+        model for model in MODEL_OPTIONS
+        if current.lower() in model.lower()
+    ]
+    
+    # If no matches, show all models
+    if not matches:
+        matches = MODEL_OPTIONS
+    
+    # Return up to 25 choices (Discord limit)
+    return [
+        app_commands.Choice(name=model, value=model)
+        for model in matches[:25]
+    ]
+
+
+async def image_model_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> List[app_commands.Choice[str]]:
+    """
+    Autocomplete function for image generation model selection.
+    """
+    image_models = ["flux", "flux-dev", "sdxl", "realistic", "anime", "dreamshaper"]
+    matches = [m for m in image_models if current.lower() in m.lower()]
+    
+    if not matches:
+        matches = image_models
+    
+    return [
+        app_commands.Choice(name=model, value=model)
+        for model in matches[:25]
+    ]
 
 def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator: ImageGenerator):
     """
@@ -112,7 +143,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
     @tree.command(name="choose_model", description="Select the AI model to use for responses.")
     @check_blacklist()
     async def choose_model(interaction: discord.Interaction):
-        """Lets users choose an AI model and saves it to the database."""
+        """Lets users choose an AI model using a dropdown menu."""
         options = [discord.SelectOption(label=model, value=model) for model in MODEL_OPTIONS]
         select_menu = discord.ui.Select(placeholder="Choose a model", options=options)
 
@@ -130,6 +161,43 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         view = discord.ui.View()
         view.add_item(select_menu)
         await interaction.response.send_message("Choose a model:", view=view, ephemeral=True)
+
+    @tree.command(name="set_model", description="Set AI model directly with autocomplete suggestions.")
+    @app_commands.describe(model="The AI model to use (type to search)")
+    @app_commands.autocomplete(model=model_autocomplete)
+    @check_blacklist()
+    async def set_model(interaction: discord.Interaction, model: str):
+        """Sets the AI model directly using autocomplete."""
+        user_id = interaction.user.id
+        
+        # Validate the model is in the allowed list
+        if model not in MODEL_OPTIONS:
+            # Find close matches for suggestions
+            close_matches = [m for m in MODEL_OPTIONS if model.lower() in m.lower()]
+            if close_matches:
+                suggestions = ", ".join(f"`{m}`" for m in close_matches[:5])
+                await interaction.response.send_message(
+                    f"❌ Invalid model `{model}`. Did you mean: {suggestions}?",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"❌ Invalid model `{model}`. Use `/choose_model` to see available options.",
+                    ephemeral=True
+                )
+            return
+        
+        # Save the model selection
+        await db_handler.save_user_model(user_id, model)
+        
+        # Get pricing info for the selected model
+        pricing = MODEL_PRICING.get(model, {"input": 0, "output": 0})
+        
+        await interaction.response.send_message(
+            f"✅ Model set to `{model}`\n"
+            f"💰 Pricing: ${pricing['input']:.2f}/1M input, ${pricing['output']:.2f}/1M output",
+            ephemeral=True
+        )
 
     @tree.command(name="search", description="Search on Google and send results to AI model.")
     @app_commands.describe(query="The search query")
@@ -494,16 +562,22 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
     async def help_command(interaction: discord.Interaction):
         """Sends a list of available commands to the user."""
         help_message = (
-            "**Available commands:**\n"
-            "/choose_model - Select which AI model to use for responses (openai/gpt-4o, openai/gpt-4o-mini, openai/gpt-5, openai/gpt-5-nano, openai/gpt-5-mini, openai/gpt-5-chat, openai/o1-preview, openai/o1-mini).\n"
-            "/search `<query>` - Search Google and send results to the AI model.\n"
-            "/web `<url>` - Scrape a webpage and send the data to the AI model.\n"
-            "/generate `<prompt>` - Generate an image from a text prompt.\n"
-            "/toggle_tools - Toggle display of tool execution details (code, input, output).\n"
-            "/reset - Reset your chat history and token usage statistics.\n"
-            "/user_stat - Get information about your token usage, costs, and current model.\n"
-            "/prices - Display pricing information for all available AI models.\n"
-            "/help - Display this help message.\n"
+            "**🤖 Available Commands:**\n\n"
+            "**Model Selection:**\n"
+            "• `/choose_model` - Select AI model from a dropdown menu\n"
+            "• `/set_model <model>` - Set model directly with autocomplete\n\n"
+            "**Search & Web:**\n"
+            "• `/search <query>` - Search Google and analyze results with AI\n"
+            "• `/web <url>` - Scrape and analyze a webpage\n\n"
+            "**Image Generation:**\n"
+            "• `/generate <prompt>` - Generate images from text\n\n"
+            "**Settings & Stats:**\n"
+            "• `/toggle_tools` - Toggle tool execution details display\n"
+            "• `/user_stat` - View your token usage and costs\n"
+            "• `/prices` - Display model pricing information\n"
+            "• `/reset` - Clear your chat history and statistics\n\n"
+            "**Help:**\n"
+            "• `/help` - Display this help message\n"
         )
         await interaction.response.send_message(help_message, ephemeral=True)
 

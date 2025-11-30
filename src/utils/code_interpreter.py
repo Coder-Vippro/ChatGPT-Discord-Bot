@@ -71,19 +71,40 @@ APPROVED_PACKAGES = {
     'more-itertools', 'toolz', 'cytoolz', 'funcy'
 }
 
-# Blocked patterns
+# Blocked patterns - Comprehensive security checks
 # Note: We allow open() for writing to enable saving plots and outputs
 # The sandboxed environment restricts file access to safe directories
 BLOCKED_PATTERNS = [
-    # Dangerous system modules
+    # ==================== DANGEROUS SYSTEM MODULES ====================
+    # OS module (except path)
     r'import\s+os\b(?!\s*\.path)',
     r'from\s+os\s+import\s+(?!path)',
+    
+    # File system modules
     r'import\s+shutil\b',
     r'from\s+shutil\s+import',
+    r'import\s+pathlib\b(?!\s*\.)',  # Allow pathlib usage but monitor
+    
+    # Subprocess and execution modules
     r'import\s+subprocess\b',
     r'from\s+subprocess\s+import',
-    r'import\s+sys\b(?!\s*\.(?:path|version|platform))',
-    r'from\s+sys\s+import',
+    r'import\s+multiprocessing\b',
+    r'from\s+multiprocessing\s+import',
+    r'import\s+threading\b',
+    r'from\s+threading\s+import',
+    r'import\s+concurrent\b',
+    r'from\s+concurrent\s+import',
+    
+    # System access modules
+    r'import\s+sys\b(?!\s*\.(?:path|version|platform|stdout|stderr))',
+    r'from\s+sys\s+import\s+(?!path|version|platform|stdout|stderr)',
+    r'import\s+platform\b',
+    r'from\s+platform\s+import',
+    r'import\s+ctypes\b',
+    r'from\s+ctypes\s+import',
+    r'import\s+_[a-z]+',  # Block private C modules
+    
+    # ==================== NETWORK MODULES ====================
     r'import\s+socket\b',
     r'from\s+socket\s+import',
     r'import\s+urllib\b',
@@ -92,19 +113,98 @@ BLOCKED_PATTERNS = [
     r'from\s+requests\s+import',
     r'import\s+aiohttp\b',
     r'from\s+aiohttp\s+import',
-    # Dangerous code execution
+    r'import\s+httpx\b',
+    r'from\s+httpx\s+import',
+    r'import\s+http\.client\b',
+    r'from\s+http\.client\s+import',
+    r'import\s+ftplib\b',
+    r'from\s+ftplib\s+import',
+    r'import\s+smtplib\b',
+    r'from\s+smtplib\s+import',
+    r'import\s+telnetlib\b',
+    r'from\s+telnetlib\s+import',
+    r'import\s+ssl\b',
+    r'from\s+ssl\s+import',
+    r'import\s+paramiko\b',
+    r'from\s+paramiko\s+import',
+    
+    # ==================== DANGEROUS CODE EXECUTION ====================
     r'__import__\s*\(',
     r'\beval\s*\(',
     r'\bexec\s*\(',
     r'\bcompile\s*\(',
     r'\bglobals\s*\(',
     r'\blocals\s*\(',
-    # File system operations (dangerous)
+    r'\bgetattr\s*\([^,]+,\s*[\'"]__',  # Block getattr for dunder methods
+    r'\bsetattr\s*\([^,]+,\s*[\'"]__',  # Block setattr for dunder methods
+    r'\bdelattr\s*\([^,]+,\s*[\'"]__',  # Block delattr for dunder methods
+    r'\.\_\_\w+\_\_',  # Block dunder method access
+    
+    # ==================== FILE SYSTEM OPERATIONS ====================
     r'\.unlink\s*\(',
     r'\.rmdir\s*\(',
     r'\.remove\s*\(',
     r'\.chmod\s*\(',
     r'\.chown\s*\(',
+    r'\.rmtree\s*\(',
+    r'\.rename\s*\(',
+    r'\.replace\s*\(',
+    r'\.makedirs\s*\(',  # Allow mkdir but block makedirs outside sandbox
+    r'Path\s*\(\s*[\'"]\/(?!tmp)',  # Block absolute paths outside /tmp
+    r'open\s*\(\s*[\'"]\/(?!tmp)',  # Block file access outside /tmp
+    
+    # ==================== PICKLE AND SERIALIZATION ====================
+    r'pickle\.loads?\s*\(',
+    r'cPickle\.loads?\s*\(',
+    r'marshal\.loads?\s*\(',
+    r'shelve\.open\s*\(',
+    
+    # ==================== PROCESS MANIPULATION ====================
+    r'os\.system\s*\(',
+    r'os\.popen\s*\(',
+    r'os\.spawn',
+    r'os\.exec',
+    r'os\.fork\s*\(',
+    r'os\.kill\s*\(',
+    r'os\.killpg\s*\(',
+    
+    # ==================== ENVIRONMENT ACCESS ====================
+    r'os\.environ',
+    r'os\.getenv\s*\(',
+    r'os\.putenv\s*\(',
+    
+    # ==================== DANGEROUS BUILTINS ====================
+    r'__builtins__',
+    r'__loader__',
+    r'__spec__',
+    
+    # ==================== CODE OBJECT MANIPULATION ====================
+    r'\.f_code',
+    r'\.f_globals',
+    r'\.f_locals',
+    r'\.gi_frame',
+    r'\.co_code',
+    r'types\.CodeType',
+    r'types\.FunctionType',
+    
+    # ==================== IMPORT SYSTEM MANIPULATION ====================
+    r'import\s+importlib\b',
+    r'from\s+importlib\s+import',
+    r'sys\.modules',
+    r'sys\.path\.(?:append|insert|extend)',
+    
+    # ==================== MEMORY OPERATIONS ====================
+    r'gc\.',
+    r'sys\.getsizeof',
+    r'sys\.getrefcount',
+    r'id\s*\(',  # Block id() which can leak memory addresses
+]
+
+# Additional patterns that log warnings but don't block
+WARNING_PATTERNS = [
+    (r'while\s+True', "Infinite loop detected - ensure break condition exists"),
+    (r'for\s+\w+\s+in\s+range\s*\(\s*\d{6,}', "Very large loop detected"),
+    (r'recursion', "Recursion detected - ensure base case exists"),
 ]
 
 
@@ -772,10 +872,54 @@ class CodeExecutor:
                 logger.warning(f"Cleanup failed: {e}")
     
     def validate_code_security(self, code: str) -> Tuple[bool, str]:
-        """Validate code for security threats."""
+        """
+        Validate code for security threats.
+        
+        Performs comprehensive security checks including:
+        - Blocked patterns (dangerous imports, code execution, file ops)
+        - Warning patterns (potential issues that are logged)
+        - Code structure validation
+        
+        Args:
+            code: The Python code to validate
+            
+        Returns:
+            Tuple of (is_safe, message)
+        """
+        # Check for blocked patterns
         for pattern in BLOCKED_PATTERNS:
             if re.search(pattern, code, re.IGNORECASE):
-                return False, f"Blocked unsafe operation: {pattern}"
+                logger.warning(f"Blocked code pattern detected: {pattern[:50]}...")
+                return False, f"Security violation: Unsafe operation detected"
+        
+        # Check for warning patterns (log but don't block)
+        for pattern, warning_msg in WARNING_PATTERNS:
+            if re.search(pattern, code, re.IGNORECASE):
+                logger.warning(f"Code warning: {warning_msg}")
+        
+        # Additional structural checks
+        try:
+            # Parse the AST to check for suspicious constructs
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                # Check for suspicious attribute access
+                if isinstance(node, ast.Attribute):
+                    if node.attr.startswith('_') and node.attr.startswith('__'):
+                        logger.warning(f"Dunder attribute access detected: {node.attr}")
+                        return False, "Security violation: Private attribute access not allowed"
+                
+                # Check for suspicious function calls
+                if isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name):
+                        if node.func.id in ['eval', 'exec', 'compile', '__import__']:
+                            return False, f"Security violation: {node.func.id}() is not allowed"
+                    
+        except SyntaxError:
+            # Syntax errors will be caught during execution
+            pass
+        except Exception as e:
+            logger.warning(f"Error during AST validation: {e}")
+        
         return True, "Code passed security validation"
     
     def _extract_imports_from_code(self, code: str) -> List[str]:

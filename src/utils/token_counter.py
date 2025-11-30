@@ -304,8 +304,8 @@ class TokenCounter:
         Returns:
             Estimated cost in USD
         """
-        # Import here to avoid circular dependency
-        from src.commands.commands import MODEL_PRICING
+        # Import from centralized pricing module
+        from src.config.pricing import MODEL_PRICING
         
         if model not in MODEL_PRICING:
             model = "openai/gpt-4o"  # Default fallback

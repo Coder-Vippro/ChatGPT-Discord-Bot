@@ -160,7 +160,12 @@ class DatabaseHandler:
         return []
     
     def _filter_expired_images(self, history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filter out image links that are older than 23 hours"""
+        """
+        Filter out image links that are older than 23 hours.
+        
+        Properly handles timezone-aware and timezone-naive datetime comparisons
+        to prevent issues with ISO string parsing.
+        """
         current_time = datetime.now()
         expiration_time = current_time - timedelta(hours=23)
         
@@ -183,11 +188,27 @@ class DatabaseHandler:
                     # Check image items for timestamp
                     elif item.get('type') == 'image_url':
                         # If there's no timestamp or timestamp is newer than expiration time, keep it
-                        timestamp = item.get('timestamp')
-                        if not timestamp or datetime.fromisoformat(timestamp) > expiration_time:
+                        timestamp_str = item.get('timestamp')
+                        if not timestamp_str:
+                            # No timestamp, keep the image
                             filtered_content.append(item)
                         else:
-                            logging.info(f"Filtering out expired image URL (added at {timestamp})")
+                            try:
+                                # Parse the ISO timestamp, handling both timezone-aware and naive
+                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                
+                                # Make comparison timezone-naive for consistency
+                                if timestamp.tzinfo is not None:
+                                    timestamp = timestamp.replace(tzinfo=None)
+                                
+                                if timestamp > expiration_time:
+                                    filtered_content.append(item)
+                                else:
+                                    logging.debug(f"Filtering out expired image URL (added at {timestamp_str})")
+                            except (ValueError, AttributeError) as e:
+                                # If we can't parse the timestamp, keep the image to be safe
+                                logging.warning(f"Could not parse image timestamp '{timestamp_str}': {e}")
+                                filtered_content.append(item)
                 
                 # Update the message with filtered content
                 if filtered_content:
