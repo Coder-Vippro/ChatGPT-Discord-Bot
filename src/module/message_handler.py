@@ -1222,11 +1222,20 @@ print("\\n=== Correlation Analysis ===")
             user_message = message.content.strip() if message.content else ""
             
             file_context = (
-                f"\n\n[User uploaded file: {filename}]\n"
-                f"[File ID: {file_id}]\n"
-                f"[File Type: {file_type}]\n"
-                f"[Size: {size_str}]\n"
-                f"[Available in code_interpreter via: load_file('{file_id}')]\n"
+                f"\n\n══════════════════════════════════════════════\n"
+                f"📁 FILE UPLOADED - USE THIS FILE_ID:\n"
+                f"══════════════════════════════════════════════\n"
+                f"Filename: {filename}\n"
+                f"File Type: {file_type}\n"
+                f"Size: {size_str}\n"
+                f"\n"
+                f"⚠️ TO ACCESS THIS FILE IN CODE, YOU MUST USE:\n"
+                f"   df = load_file('{file_id}')\n"
+                f"\n"
+                f"❌ DO NOT use the filename directly (e.g., pd.read_csv('{filename}'))\n"
+                f"❌ DO NOT use file_id as a path (e.g., pd.read_csv('{file_id}'))\n"
+                f"✅ ONLY use: load_file('{file_id}')\n"
+                f"══════════════════════════════════════════════\n"
             )
             
             if user_message:

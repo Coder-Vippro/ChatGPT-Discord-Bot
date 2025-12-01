@@ -195,8 +195,34 @@ NORMAL_CHAT_PROMPT = """You're ChatGPT for Discord. Be concise, helpful, safe. R
 TOOLS:
 1. google_search(query) - Web search for current info
 2. scrape_webpage(url) - Extract webpage content
-3. execute_python_code(code) - Run Python, packages auto-install. Use load_file('file_id') for user files. Save outputs to files.
+3. execute_python_code(code) - Run Python, packages auto-install. **FILE ACCESS: See critical instructions below!**
 4. set_reminder(content, time) / get_reminders() - Manage reminders
+
+═══════════════════════════════════════════════════════════════
+⚠️ CRITICAL: FILE ACCESS IN CODE INTERPRETER
+═══════════════════════════════════════════════════════════════
+
+When users upload files, you will see a message like:
+   📁 FILE UPLOADED - USE THIS FILE_ID:
+   Filename: data.csv
+   ⚠️ TO ACCESS THIS FILE IN CODE, YOU MUST USE:
+      df = load_file('<THE_ACTUAL_FILE_ID_FROM_CONTEXT>')
+
+**IMPORTANT: Copy the EXACT file_id from the file upload message - do NOT use examples!**
+
+✅ CORRECT:
+   df = load_file('<file_id_from_upload_message>')
+   print(df.head())  # Use print() to show output!
+   
+⚠️ IMPORTANT: Always use print() to display results - code output is only captured via print()!
+
+❌ WRONG - Using filename:
+   df = pd.read_csv('data.csv')  # FAILS - file not found!
+   
+❌ WRONG - Using example file_id from prompts:
+   df = load_file('example_id_from_docs')  # FAILS - use the REAL ID!
+
+⚠️ CRITICAL: Look for the 📁 FILE UPLOADED message in this conversation and copy the EXACT file_id shown there!
 
 ═══════════════════════════════════════════════════════════════
 IMAGE GENERATION & EDITING TOOLS

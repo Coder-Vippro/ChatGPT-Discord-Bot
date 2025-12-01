@@ -197,7 +197,7 @@ BLOCKED_PATTERNS = [
     r'gc\.',
     r'sys\.getsizeof',
     r'sys\.getrefcount',
-    r'id\s*\(',  # Block id() which can leak memory addresses
+    r'\bid\s*\(',  # Block id() which can leak memory addresses (\b ensures word boundary)
 ]
 
 # Additional patterns that log warnings but don't block
@@ -1050,31 +1050,57 @@ import os
 
 FILES = {json.dumps(file_paths_map)}
 
+def get_file_path(file_id):
+    '''
+    Get the actual file path for a given file ID.
+    Use this to get the path for pd.read_csv(), open(), etc.
+    
+    Args:
+        file_id: The file ID provided when the file was uploaded
+    
+    Returns:
+        str: The actual file path on disk
+    
+    Example:
+        path = get_file_path('878573881449906208_1764556246_bdbaecc8')
+        df = pd.read_csv(path)
+    
+    Available files: Use list(FILES.keys()) to see available files
+    '''
+    if file_id not in FILES:
+        raise ValueError(f"File '{{file_id}}' not found. Available: {{list(FILES.keys())}}")
+    return FILES[file_id]
+
 def load_file(file_id):
     '''
-    Load a file automatically based on its extension.
-    Supports 200+ file types with smart auto-detection.
+    Load a file automatically based on its extension and return the data directly.
+    DO NOT pass the result to pd.read_csv() - it already returns a DataFrame!
     
     Args:
         file_id: The file ID provided when the file was uploaded
     
     Returns:
         Loaded file data (varies by file type):
-        - CSV/TSV: pandas DataFrame
+        - CSV/TSV: pandas DataFrame (ready to use!)
         - Excel (.xlsx, .xls): pandas ExcelFile object
         - JSON: pandas DataFrame or dict
         - Parquet/Feather: pandas DataFrame
         - Text files: string content
         - Images: PIL Image object
-        - And 200+ more formats...
     
-    Excel file usage examples:
-        excel_file = load_file('file_id')
-        sheet_names = excel_file.sheet_names
-        df = excel_file.parse('Sheet1')
-        df2 = pd.read_excel(excel_file, sheet_name='Sheet1')
+    CORRECT usage for CSV:
+        df = load_file('file_id')  # Returns DataFrame directly
+        print(df.head())
     
-    Available files: {{', '.join(FILES.keys()) if FILES else 'None'}}
+    WRONG usage (DO NOT DO THIS):
+        file_path = load_file('file_id')  # WRONG! This is a DataFrame, not a path
+        df = pd.read_csv(file_path)       # This will FAIL!
+    
+    If you need the file path instead, use get_file_path():
+        path = get_file_path('file_id')
+        df = pd.read_csv(path)
+    
+    Available files: Use list(FILES.keys()) to see available files
     '''
     if file_id not in FILES:
         available_files = list(FILES.keys())

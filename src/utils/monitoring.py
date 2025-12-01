@@ -190,7 +190,7 @@ def capture_exception(
     """
     logger.exception(f"Captured exception: {exception}")
     
-    if SENTRY_AVAILABLE and sentry_sdk.Hub.current.client:
+    if SENTRY_AVAILABLE and sentry_sdk.is_initialized():
         with sentry_sdk.push_scope() as scope:
             if context:
                 for key, value in context.items():
@@ -219,7 +219,7 @@ def capture_message(
     log_method = getattr(logger, level, logger.info)
     log_method(message)
     
-    if SENTRY_AVAILABLE and sentry_sdk.Hub.current.client:
+    if SENTRY_AVAILABLE and sentry_sdk.is_initialized():
         with sentry_sdk.push_scope() as scope:
             if context:
                 for key, value in context.items():
@@ -242,7 +242,7 @@ def set_user_context(
         username: Discord username
         guild_id: Discord guild ID
     """
-    if SENTRY_AVAILABLE and sentry_sdk.Hub.current.client:
+    if SENTRY_AVAILABLE and sentry_sdk.is_initialized():
         sentry_sdk.set_user({
             "id": str(user_id),
             "username": username,
@@ -325,7 +325,7 @@ async def measure_async(name: str, **metadata):
     
     # Start Sentry transaction if available
     transaction = None
-    if SENTRY_AVAILABLE and sentry_sdk.Hub.current.client:
+    if SENTRY_AVAILABLE and sentry_sdk.is_initialized():
         transaction = sentry_sdk.start_transaction(
             op="task",
             name=name

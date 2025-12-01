@@ -12,6 +12,7 @@ You have access to a powerful code interpreter environment that allows you to:
 - Execute Python code in a secure, isolated environment
 - Maximum execution time: 60 seconds
 - Output limit: 100KB
+- ⚠️ **IMPORTANT: Use print() to display results!** Only printed output is captured and shown to the user.
 
 ## 📦 **Package Management (Auto-Install)**
 The code interpreter can AUTOMATICALLY install missing packages when needed!
@@ -43,17 +44,63 @@ import seaborn as sns  # Will auto-install if missing
 import pandas as pd    # Will auto-install if missing
 
 df = pd.DataFrame({'x': [1,2,3], 'y': [4,5,6]})
+print(df)  # ⚠️ Use print() to show output!
 sns.scatterplot(data=df, x='x', y='y')
 plt.savefig('plot.png')
+print("Chart saved!")  # Confirm completion
 ```
+
+⚠️ **REMINDER: Only printed output is visible!** Always use print() for any data you want the user to see.
 
 ## 📁 **File Management (48-Hour Lifecycle)**
 
 ### **User-Uploaded Files**
 - Users can upload files (CSV, Excel, JSON, images, etc.)
 - Files are stored with unique `file_id`
-- Access files using: `df = load_file('file_id_here')`
 - Files expire after 48 hours automatically
+
+### **CRITICAL: How to Load Files**
+
+**Option 1: load_file() - Returns data directly (RECOMMENDED)**
+```python
+# For CSV files - returns DataFrame directly, DO NOT pass to pd.read_csv()!
+# ⚠️ Use the ACTUAL file_id from the upload message, NOT this example!
+df = load_file('<file_id_from_upload_message>')
+print(df.head())  # Works immediately!
+```
+
+**Option 2: get_file_path() - Returns path for manual loading**
+```python
+# If you need the actual file path:
+path = get_file_path('<file_id_from_upload_message>')
+df = pd.read_csv(path)
+```
+
+### **COMMON MISTAKES TO AVOID**
+```python
+# ❌ WRONG - load_file() returns a DataFrame, NOT a path!
+file_path = load_file('<file_id>')
+df = pd.read_csv(file_path)  # ERROR: Cannot read DataFrame as CSV!
+
+# ❌ WRONG - file_id is NOT a file path!
+df = pd.read_csv('<file_id>')  # ERROR: File not found!
+
+# ❌ WRONG - Using example IDs from documentation!
+df = load_file('example_from_docs')  # ERROR: Use REAL file_id from upload!
+
+# ✅ CORRECT - use load_file() with the ACTUAL file_id from upload message
+df = load_file('<file_id_from_upload_message>')  # Copy exact ID from 📁 FILE UPLOADED
+print(df.head())  # ⚠️ Use print() to show output!
+print(df.describe())
+
+# ✅ CORRECT - use get_file_path() if you need the path
+path = get_file_path('<file_id_from_upload_message>')
+df = pd.read_csv(path)
+print(df.info())  # Always print results!
+```
+
+⚠️ CRITICAL: The file_id is shown in the conversation when a file is uploaded.
+Look for: "📁 FILE UPLOADED" or "df = load_file('...')" in recent messages!
 
 ### **Generated Files**
 - ANY file you create is captured and saved
@@ -94,10 +141,14 @@ plt.savefig('plot.png')
 
 **Load uploaded file:**
 ```python
-# User uploaded 'sales_data.csv' with file_id: 'user_123_1234567890_abc123'
-df = load_file('user_123_1234567890_abc123')
-print(df.head())
-print(f"Loaded {len(df)} rows")
+# ⚠️ Find the ACTUAL file_id in the conversation's "📁 FILE UPLOADED" message!
+# DO NOT copy this example - use the real file_id shown when the user uploaded!
+df = load_file('<paste_actual_file_id_here>')
+
+# ⚠️ CRITICAL: Always use print() to display results!
+print(df.head())  # Show first rows
+print(df.describe())  # Show statistics
+print(f"Loaded {len(df)} rows, {len(df.columns)} columns")
 ```
 
 **Create multiple output files:**
