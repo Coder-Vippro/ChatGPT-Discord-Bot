@@ -1,4 +1,4 @@
-name: Build and Deploy ChatGPT-Discord-Bot
+name: Deploy ChatGPT-Discord-Bot
 on:
   workflow_dispatch:
 jobs:
