@@ -1,0 +1,28 @@
+name: Build and Deploy ChatGPT-Discord-Bot
+on:
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: quocanh
+    permissions:
+      contents: read
+      packages: write
+    # cd to /vps/chatgptdsc and do docker compose down then docker compose pull the docker compose up -d
+    steps:
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} 
+      - name: cd to deployment directory
+        run: cd /vps/chatgptdsc
+        
+      - name: Pull latest images
+        run: docker compose -f docker-compose.yml pull
+      
+      - name: Stop existing services
+        run: docker compose -f docker-compose.yml down
+      
+      - name: Start services
+        run: docker compose -f docker-compose.yml up -d
