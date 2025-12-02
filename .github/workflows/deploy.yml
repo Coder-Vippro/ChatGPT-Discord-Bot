@@ -22,10 +22,10 @@ jobs:
         run: cd /home/vps/chatgptdsc
         
       - name: Pull latest images
-        run: docker compose -f docker-compose.yml pull
+        run: docker compose -f /home/vps/chatgptdsc/docker-compose.yml pull
       
       - name: Stop existing services
-        run: docker compose -f docker-compose.yml down
+        run: docker compose -f /home/vps/chatgptdsc/docker-compose.yml down
       
       - name: Start services
-        run: docker compose -f docker-compose.yml up -d
+        run: docker compose -f /home/vps/chatgptdsc/docker-compose.yml up -d
