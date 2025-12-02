@@ -1,6 +1,9 @@
 name: Deploy ChatGPT-Discord-Bot
 on:
   workflow_dispatch:
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 jobs:
   deploy:
     runs-on: quocanh
