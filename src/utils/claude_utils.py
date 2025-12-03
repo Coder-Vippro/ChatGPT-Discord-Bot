@@ -97,15 +97,13 @@ def convert_messages_for_claude(messages: List[Dict[str, Any]]) -> Tuple[Optiona
                             except (IndexError, ValueError) as e:
                                 logging.warning(f"Failed to parse base64 image: {e}")
                         else:
-                            # For URLs, Claude requires downloading the image
-                            # We'll include it as a URL reference in text for now
+                            # Claude doesn't support direct URL images via API
+                            # Convert to text description mentioning the image
                             claude_content.append({
-                                "type": "image",
-                                "source": {
-                                    "type": "url",
-                                    "url": url
-                                }
+                                "type": "text",
+                                "text": f"[Image URL: {url}]"
                             })
+                            logging.info(f"Converted image URL to text reference for Claude: {url[:80]}...")
             
             if claude_content:
                 converted_messages.append({
