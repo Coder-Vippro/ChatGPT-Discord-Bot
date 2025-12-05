@@ -175,6 +175,26 @@ class MessageHandler:
             logging.warning(f"Failed to initialize tiktoken encoder: {e}")
             self.token_encoder = None
     
+    def _build_claude_tool_result_message(self, tool_call_id: str, content: str) -> Dict[str, Any]:
+        """
+        Build a tool result message for Claude API.
+        
+        Args:
+            tool_call_id: The ID of the tool call this result is for
+            content: The result content from the tool execution
+            
+        Returns:
+            Dict: A properly formatted Claude tool result message
+        """
+        return {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_call_id,
+                "content": content
+            }]
+        }
+    
     def _find_user_id_from_current_task(self):
         """
         Utility method to find user_id from the current asyncio task.
@@ -1643,10 +1663,9 @@ print("\\n=== Correlation Analysis ===")
                             "content": claude_response.get("content", "")
                         })
                         for result in tool_results:
-                            updated_messages.append({
-                                "role": "user",
-                                "content": [{"type": "tool_result", "tool_use_id": result["tool_call_id"], "content": result["content"]}]
-                            })
+                            updated_messages.append(
+                                self._build_claude_tool_result_message(result["tool_call_id"], result["content"])
+                            )
                         
                         # Make follow-up call
                         follow_up_response = await call_claude_api(

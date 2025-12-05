@@ -196,9 +196,12 @@ def parse_data_url(data_url: str) -> Tuple[str, str]:
         
     Returns:
         Tuple of (media_type, base64_data)
+        
+    Raises:
+        ValueError: If the data URL format is invalid
     """
     if not data_url.startswith("data:"):
-        raise ValueError("Not a data URL")
+        raise ValueError(f"Not a data URL: expected 'data:' prefix, got '{data_url[:20]}...'")
     
     # Remove "data:" prefix
     content = data_url[5:]
@@ -206,7 +209,7 @@ def parse_data_url(data_url: str) -> Tuple[str, str]:
     # Split by semicolon and comma
     parts = content.split(";base64,")
     if len(parts) != 2:
-        raise ValueError("Invalid data URL format")
+        raise ValueError(f"Invalid data URL format: expected ';base64,' separator, got '{content[:50]}...'")
     
     media_type = parts[0]
     base64_data = parts[1]
