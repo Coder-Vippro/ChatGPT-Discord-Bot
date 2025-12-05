@@ -17,7 +17,7 @@ from src.config.config import (
     DISCORD_TOKEN, MONGODB_URI, RUNWARE_API_KEY, STATUSES, 
     LOGGING_CONFIG, ENABLE_WEBHOOK_LOGGING, LOGGING_WEBHOOK_URL, 
     WEBHOOK_LOG_LEVEL, WEBHOOK_APP_NAME, WEBHOOK_BATCH_SIZE, 
-    WEBHOOK_FLUSH_INTERVAL, LOG_LEVEL_MAP
+    WEBHOOK_FLUSH_INTERVAL, LOG_LEVEL_MAP, ANTHROPIC_API_KEY
 )
 
 # Import webhook logger
@@ -124,6 +124,20 @@ async def main():
         logging.error(f"Error initializing OpenAI client: {e}")
         return
     
+    # Initialize the Anthropic client (for Claude models)
+    anthropic_client = None
+    if ANTHROPIC_API_KEY:
+        try:
+            from anthropic import AsyncAnthropic
+            anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            logging.info("Anthropic client initialized successfully")
+        except ImportError:
+            logging.warning("Anthropic package not installed. Claude models will not be available. Install with: pip install anthropic")
+        except Exception as e:
+            logging.warning(f"Error initializing Anthropic client: {e}. Claude models will not be available.")
+    else:
+        logging.info("ANTHROPIC_API_KEY not set - Claude models will not be available")
+    
     # Global references to objects that need cleanup
     message_handler = None
     db_handler = None
@@ -191,14 +205,14 @@ async def main():
             await ctx.send(f"Error: {error_msg}")
         
         # Initialize message handler
-        message_handler = MessageHandler(bot, db_handler, openai_client, image_generator)
+        message_handler = MessageHandler(bot, db_handler, openai_client, image_generator, anthropic_client)
         
         # Attach db_handler to bot for cogs
         bot.db_handler = db_handler
         
         # Set up slash commands
         from src.commands.commands import setup_commands
-        setup_commands(bot, db_handler, openai_client, image_generator)
+        setup_commands(bot, db_handler, openai_client, image_generator, anthropic_client)
         
         # Load file management commands
         try:
