@@ -2,8 +2,8 @@ test.py
 .env
 chat_history.db
 bot_copy.py
-__pycache__/bot.cpython-312.pyc
-tests/__pycache__/test_bot.cpython-312.pyc
+__pycache__/
+*.pyc
 .vscode/settings.json
 chatgpt.zip
 response.txt
@@ -13,3 +13,4 @@ temp_charts
 .idea
 temp_data_files
 logs/
+.pytest_cache/
