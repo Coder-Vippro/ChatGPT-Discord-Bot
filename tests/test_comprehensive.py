@@ -89,6 +89,10 @@ class TestPricingModule:
             "openai/gpt-4.1",
             "openai/gpt-5",
             "openai/o1",
+            "anthropic/claude-sonnet-4-20250514",
+            "anthropic/claude-opus-4-20250514",
+            "anthropic/claude-3.5-sonnet",
+            "anthropic/claude-3.5-haiku",
         ]
         
         for model in expected_models:
@@ -105,6 +109,10 @@ class TestPricingModule:
         # Test smaller amounts
         cost = calculate_cost("openai/gpt-4o", 1000, 1000)
         assert cost == pytest.approx(0.025, rel=1e-6)  # $0.005 + $0.020
+        
+        # Test Claude model
+        cost = calculate_cost("anthropic/claude-3.5-sonnet", 1_000_000, 1_000_000)
+        assert cost == 18.00  # $3 + $15
     
     def test_calculate_cost_unknown_model(self):
         """Test that unknown models return 0 cost."""
@@ -402,6 +410,92 @@ class TestCodeInterpreterSecurity:
         assert fm._detect_file_type("image.png") == "image"
         assert fm._detect_file_type("script.py") == "python"
         assert fm._detect_file_type("unknown.xyz") == "binary"
+
+
+# ============================================================
+# Claude Utils Tests
+# ============================================================
+
+class TestClaudeUtils:
+    """Tests for Claude utility functions."""
+    
+    def test_is_claude_model(self):
+        """Test Claude model detection."""
+        from src.utils.claude_utils import is_claude_model
+        
+        # Claude models
+        assert is_claude_model("anthropic/claude-sonnet-4-20250514") == True
+        assert is_claude_model("anthropic/claude-opus-4-20250514") == True
+        assert is_claude_model("anthropic/claude-3.5-sonnet") == True
+        assert is_claude_model("anthropic/claude-3.5-haiku") == True
+        
+        # Non-Claude models
+        assert is_claude_model("openai/gpt-4o") == False
+        assert is_claude_model("openai/gpt-4o-mini") == False
+        assert is_claude_model("gpt-4") == False
+    
+    def test_get_claude_model_id(self):
+        """Test Claude model ID extraction."""
+        from src.utils.claude_utils import get_claude_model_id
+        
+        assert get_claude_model_id("anthropic/claude-sonnet-4-20250514") == "claude-sonnet-4-20250514"
+        assert get_claude_model_id("anthropic/claude-3.5-sonnet") == "claude-3.5-sonnet"
+        assert get_claude_model_id("claude-3.5-sonnet") == "claude-3.5-sonnet"
+    
+    def test_convert_openai_messages_to_claude(self):
+        """Test message conversion from OpenAI to Claude format."""
+        from src.utils.claude_utils import convert_openai_messages_to_claude
+        
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "user", "content": "How are you?"},
+        ]
+        
+        system, claude_messages = convert_openai_messages_to_claude(messages)
+        
+        # System should be extracted
+        assert system == "You are a helpful assistant."
+        
+        # Messages should not contain system
+        assert all(m.get("role") != "system" for m in claude_messages)
+        
+        # Should have user and assistant messages
+        assert len(claude_messages) >= 2
+    
+    def test_convert_content_to_claude(self):
+        """Test content conversion."""
+        from src.utils.claude_utils import convert_content_to_claude
+        
+        # String content
+        assert convert_content_to_claude("Hello") == "Hello"
+        
+        # List content with text
+        list_content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": "World"}
+        ]
+        result = convert_content_to_claude(list_content)
+        assert isinstance(result, list)
+        assert len(result) == 2
+    
+    def test_merge_consecutive_messages(self):
+        """Test merging consecutive messages with same role."""
+        from src.utils.claude_utils import merge_consecutive_messages
+        
+        messages = [
+            {"role": "user", "content": "Hello"},
+            {"role": "user", "content": "How are you?"},
+            {"role": "assistant", "content": "Hi!"},
+        ]
+        
+        merged = merge_consecutive_messages(messages)
+        
+        # Should merge two user messages into one
+        assert len(merged) == 2
+        assert merged[0]["role"] == "user"
+        assert merged[1]["role"] == "assistant"
 
 
 # ============================================================

@@ -18,11 +18,11 @@
 
 ## 🌟 Overview
 
-**ChatGPT Discord Bot** brings the power of AI directly to your Discord server! Powered by OpenAI's latest models, this bot goes beyond simple chat - it's a complete AI assistant with **code interpretation**, **file management**, **data analysis**, and much more.
+**ChatGPT Discord Bot** brings the power of AI directly to your Discord server! Powered by OpenAI's latest models and Anthropic's Claude, this bot goes beyond simple chat - it's a complete AI assistant with **code interpretation**, **file management**, **data analysis**, and much more.
 
 ### 🎯 What Makes This Bot Special?
 
-- 🧠 **Latest AI Models** - GPT-4o, GPT-5, o1, o3-mini, and more
+- 🧠 **Latest AI Models** - GPT-4o, GPT-5, o1, o3-mini, Claude 4, and more
 - 💻 **Code Interpreter** - Execute Python code like ChatGPT (NEW in v2.0!)
 - 📁 **Smart File Management** - Handle 200+ file types with automatic cleanup
 - 📊 **Data Analysis** - Upload and analyze CSV, Excel, and scientific data
@@ -165,6 +165,15 @@ Set reminders naturally:
 - `o3-mini`
 
 </td>
+<td>
+
+**Claude (Anthropic)**
+- `claude-sonnet-4-20250514`
+- `claude-opus-4-20250514`
+- `claude-3.5-sonnet`
+- `claude-3.5-haiku`
+
+</td>
 </tr>
 </table>
 
@@ -179,6 +188,7 @@ Before you begin, ensure you have:
 - 🐳 **Docker** (recommended) or Python 3.13+
 - 🎮 **Discord Bot Token** ([Create one here](https://discord.com/developers/applications))
 - 🔑 **OpenAI API Key** ([Get it here](https://platform.openai.com/api-keys))
+- 🧠 **Anthropic API Key** (Optional, for Claude models - [Get it here](https://console.anthropic.com/))
 - 🎨 **Runware API Key** ([Sign up here](https://runware.ai/))
 - 🔍 **Google API Key** ([Google Cloud Console](https://console.cloud.google.com/))
 - 🗄️ **MongoDB** ([MongoDB Atlas](https://cloud.mongodb.com/) - Free tier available)
@@ -194,6 +204,9 @@ DISCORD_TOKEN=your_discord_bot_token_here
 # AI Provider Keys
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Anthropic (Claude) - Optional
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Image Generation
 RUNWARE_API_KEY=your_runware_api_key_here

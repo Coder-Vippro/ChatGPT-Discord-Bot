@@ -15,6 +15,7 @@ import base64
 import traceback
 from datetime import datetime, timedelta
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
+from src.utils.claude_utils import is_claude_model, call_claude_api, convert_claude_tool_calls_to_openai
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
@@ -95,7 +96,7 @@ except ImportError as e:
     logging.warning(f"Data analysis libraries not available: {str(e)}")
 
 class MessageHandler:
-    def __init__(self, bot, db_handler, openai_client, image_generator):
+    def __init__(self, bot, db_handler, openai_client, image_generator, anthropic_client=None):
         """
         Initialize the message handler.
         
@@ -104,10 +105,12 @@ class MessageHandler:
             db_handler: Database handler instance
             openai_client: OpenAI client instance
             image_generator: Image generator instance
+            anthropic_client: Anthropic client instance (optional, for Claude models)
         """
         self.bot = bot
         self.db = db_handler
         self.client = openai_client
+        self.anthropic_client = anthropic_client
         self.image_generator = image_generator
         self.aiohttp_session = None
         
@@ -171,6 +174,26 @@ class MessageHandler:
         except Exception as e:
             logging.warning(f"Failed to initialize tiktoken encoder: {e}")
             self.token_encoder = None
+    
+    def _build_claude_tool_result_message(self, tool_call_id: str, content: str) -> Dict[str, Any]:
+        """
+        Build a tool result message for Claude API.
+        
+        Args:
+            tool_call_id: The ID of the tool call this result is for
+            content: The result content from the tool execution
+            
+        Returns:
+            Dict: A properly formatted Claude tool result message
+        """
+        return {
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_call_id,
+                "content": content
+            }]
+        }
     
     def _find_user_id_from_current_task(self):
         """
@@ -1514,7 +1537,14 @@ print("\\n=== Correlation Analysis ===")
             
             # Determine which models should have tools available
             # openai/o1-mini and openai/o1-preview do not support tools
-            use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
+            # Claude models support tools
+            use_tools = model in [
+                "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", 
+                "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o3-mini", 
+                "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini",
+                "anthropic/claude-sonnet-4-20250514", "anthropic/claude-opus-4-20250514",
+                "anthropic/claude-3.5-sonnet", "anthropic/claude-3.5-haiku"
+            ]
             
             # Count tokens being sent to API
             total_content_length = 0
@@ -1535,177 +1565,310 @@ print("\\n=== Correlation Analysis ===")
             logging.info(f"API Request Debug - Model: {model}, Messages: {len(messages_for_api)}, "
                         f"Est. tokens: {estimated_tokens}, Content length: {total_content_length} chars")
             
-            # Prepare API call parameters
-            api_params = {
-                "model": model,
-                "messages": messages_for_api,
-                "timeout": 240  # Increased timeout for better response handling
-            }
-            
-            # Add temperature and top_p only for models that support them (exclude GPT-5 family)
-            if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
-                api_params["temperature"] = 0.3
-                api_params["top_p"] = 0.7
-            elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
-                # For other models (not GPT-4o family and not GPT-5 family)
-                api_params["temperature"] = 1
-                api_params["top_p"] = 1
-            
-            # Add tools if using a supported model
-            if use_tools:
-                tools = get_tools_for_model()
-                api_params["tools"] = tools
-            
             # Initialize variables to track tool responses
             image_generation_used = False
             chart_id = None
             image_urls = []  # Will store unique image URLs
             
-            # Make the initial API call
-            try:
-                response = await self.client.chat.completions.create(**api_params)
-            except Exception as e:
-                # Handle 413 Request Entity Too Large error with a user-friendly message
-                if "413" in str(e) or "tokens_limit_reached" in str(e) or "Request body too large" in str(e):
+            # Check if this is a Claude model
+            if is_claude_model(model):
+                # Use Claude API
+                if self.anthropic_client is None:
                     await message.channel.send(
-                        f"❌ **Request too large for {model}**\n"
-                        f"Your conversation history or message is too large for this model.\n"
-                        f"Try:\n"
-                        f"• Using `/reset` to start fresh\n"
-                        f"• Using a model with higher token limits\n"
-                        f"• Reducing the size of your current message\n"
-                        f"• Breaking up large files into smaller pieces"
+                        f"❌ **Claude model not available**\n"
+                        f"The Anthropic API key is not configured. Please set ANTHROPIC_API_KEY in your .env file."
                     )
                     return
-                else:
-                    # Re-raise other errors
-                    raise e
-            
-            # Extract token usage and calculate cost
-            input_tokens = 0
-            output_tokens = 0
-            total_cost = 0.0
-            
-            if hasattr(response, 'usage') and response.usage:
-                input_tokens = getattr(response.usage, 'prompt_tokens', 0)
-                output_tokens = getattr(response.usage, 'completion_tokens', 0)
                 
-                # Calculate cost based on model pricing
-                pricing = MODEL_PRICING.get(model)
-                if pricing:
-                    total_cost = pricing.calculate_cost(input_tokens, output_tokens)
+                try:
+                    claude_response = await call_claude_api(
+                        self.anthropic_client,
+                        messages_for_api,
+                        model,
+                        max_tokens=4096,
+                        use_tools=use_tools
+                    )
                     
-                    logging.info(f"API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: {format_cost(total_cost)}")
+                    # Extract token usage and calculate cost for Claude
+                    input_tokens = claude_response.get("input_tokens", 0)
+                    output_tokens = claude_response.get("output_tokens", 0)
+                    total_cost = 0.0
                     
-                    # Save token usage and cost to database
-                    await self.db.save_token_usage(user_id, model, input_tokens, output_tokens, total_cost)
-            
-            # Process tool calls if any
-            updated_messages = None
-            if use_tools and response.choices[0].finish_reason == "tool_calls":
-                # Process tools
-                tool_calls = response.choices[0].message.tool_calls
-                tool_messages = {}
-                
-                # Track which tools are being called
-                for tool_call in tool_calls:
-                    if tool_call.function.name in self.tool_mapping:
-                        tool_messages[tool_call.function.name] = True
-                        if tool_call.function.name == "generate_image":
-                            image_generation_used = True
-                        elif tool_call.function.name == "edit_image":
-                            # Display appropriate message for image editing
-                            await message.channel.send("🖌️ Editing image...")
-                
-                # Display appropriate messages based on which tools are being called
-                if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
-                    await message.channel.send("🔍 Researching information...")
-                
-                if tool_messages.get("execute_python_code") or tool_messages.get("analyze_data_file"):
-                    await message.channel.send("💻 Running code...")
-                
-                if tool_messages.get("generate_image"):
-                    await message.channel.send("🎨 Generating images...")
+                    # Calculate cost based on model pricing
+                    pricing = MODEL_PRICING.get(model)
+                    if pricing:
+                        total_cost = pricing.calculate_cost(input_tokens, output_tokens)
+                        logging.info(f"Claude API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: {format_cost(total_cost)}")
+                        await self.db.save_token_usage(user_id, model, input_tokens, output_tokens, total_cost)
                     
-                if tool_messages.get("set_reminder") or tool_messages.get("get_reminders"):
-                    await message.channel.send("📅 Processing reminders...")
-                
-                if not tool_messages:                        
-                    await message.channel.send("🤔 Processing...")
-                
-                # Process any tool calls and get the updated messages
-                tool_calls_processed, updated_messages = await process_tool_calls(
-                    self.client, 
-                    response, 
-                    messages_for_api, 
-                    self.tool_mapping
-                )
-                
-                # Process tool responses to extract important data (images, charts)
-                if updated_messages:
-                    # Look for image generation and code interpreter tool responses
-                    for msg in updated_messages:
-                        if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
-                            try:
-                                tool_result = json.loads(msg.get('content', '{}'))
-                                if tool_result.get('image_urls'):
-                                    image_urls.extend(tool_result['image_urls'])
-                            except:
-                                pass
+                    # Process tool calls if any
+                    updated_messages = None
+                    if use_tools and claude_response.get("tool_calls"):
+                        tool_calls = convert_claude_tool_calls_to_openai(claude_response["tool_calls"])
+                        tool_messages = {}
                         
-                        elif msg.get('role') == 'tool' and msg.get('name') == 'edit_image':
-                            try:
-                                tool_result = json.loads(msg.get('content', '{}'))
-                                if tool_result.get('image_url'):
-                                    image_urls.append(tool_result['image_url'])
-                            except:
-                                pass
+                        # Track which tools are being called
+                        for tool_call in tool_calls:
+                            if tool_call.function.name in self.tool_mapping:
+                                tool_messages[tool_call.function.name] = True
+                                if tool_call.function.name == "generate_image":
+                                    image_generation_used = True
+                                elif tool_call.function.name == "edit_image":
+                                    await message.channel.send("🖌️ Editing image...")
                         
-                        elif msg.get('role') == 'tool' and msg.get('name') in ['execute_python_code', 'analyze_data_file']:
-                            try:
-                                tool_result = json.loads(msg.get('content', '{}'))
-                                if tool_result.get('chart_id'):
-                                    chart_id = tool_result['chart_id']
-                            except:
-                                pass
-                
-                # If tool calls were processed, make another API call with the updated messages
-                if tool_calls_processed and updated_messages:
-                    # Prepare API parameters for follow-up call
-                    follow_up_params = {
-                        "model": model,
-                        "messages": updated_messages,
-                        "timeout": 240
-                    }
-                    
-                    # Add temperature only for models that support it (exclude GPT-5 family)
-                    if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
-                        follow_up_params["temperature"] = 0.3
-                    elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
-                        follow_up_params["temperature"] = 1
-                    
-                    response = await self.client.chat.completions.create(**follow_up_params)
-                    
-                    # Extract token usage and calculate cost for follow-up call
-                    if hasattr(response, 'usage') and response.usage:
-                        follow_up_input_tokens = getattr(response.usage, 'prompt_tokens', 0)
-                        follow_up_output_tokens = getattr(response.usage, 'completion_tokens', 0)
+                        # Display appropriate messages
+                        if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
+                            await message.channel.send("🔍 Researching information...")
+                        if tool_messages.get("execute_python_code") or tool_messages.get("analyze_data_file"):
+                            await message.channel.send("💻 Running code...")
+                        if tool_messages.get("generate_image"):
+                            await message.channel.send("🎨 Generating images...")
+                        if tool_messages.get("set_reminder") or tool_messages.get("get_reminders"):
+                            await message.channel.send("📅 Processing reminders...")
+                        if not tool_messages:
+                            await message.channel.send("🤔 Processing...")
                         
-                        input_tokens += follow_up_input_tokens
-                        output_tokens += follow_up_output_tokens
+                        # Process tool calls manually for Claude
+                        tool_results = []
+                        for tool_call in tool_calls:
+                            function_name = tool_call.function.name
+                            if function_name in self.tool_mapping:
+                                try:
+                                    function_args = json.loads(tool_call.function.arguments)
+                                    function_response = await self.tool_mapping[function_name](function_args)
+                                    tool_results.append({
+                                        "tool_call_id": tool_call.id,
+                                        "content": str(function_response)
+                                    })
+                                    
+                                    # Extract image URLs if generated
+                                    if function_name == "generate_image":
+                                        try:
+                                            tool_result = json.loads(function_response) if isinstance(function_response, str) else function_response
+                                            if tool_result.get('image_urls'):
+                                                image_urls.extend(tool_result['image_urls'])
+                                        except:
+                                            pass
+                                except Exception as e:
+                                    logging.error(f"Error executing {function_name}: {e}")
+                                    tool_results.append({
+                                        "tool_call_id": tool_call.id,
+                                        "content": f"Error: {str(e)}"
+                                    })
                         
-                        # Calculate additional cost
-                        pricing = MODEL_PRICING.get(model)
+                        # Build updated messages with tool results for follow-up call
+                        updated_messages = messages_for_api.copy()
+                        updated_messages.append({
+                            "role": "assistant",
+                            "content": claude_response.get("content", "")
+                        })
+                        for result in tool_results:
+                            updated_messages.append(
+                                self._build_claude_tool_result_message(result["tool_call_id"], result["content"])
+                            )
+                        
+                        # Make follow-up call
+                        follow_up_response = await call_claude_api(
+                            self.anthropic_client,
+                            updated_messages,
+                            model,
+                            max_tokens=4096,
+                            use_tools=False  # Don't need tools for follow-up
+                        )
+                        
+                        # Update token usage
+                        follow_up_input = follow_up_response.get("input_tokens", 0)
+                        follow_up_output = follow_up_response.get("output_tokens", 0)
+                        input_tokens += follow_up_input
+                        output_tokens += follow_up_output
+                        
                         if pricing:
-                            additional_cost = pricing.calculate_cost(follow_up_input_tokens, follow_up_output_tokens)
+                            additional_cost = pricing.calculate_cost(follow_up_input, follow_up_output)
                             total_cost += additional_cost
+                            await self.db.save_token_usage(user_id, model, follow_up_input, follow_up_output, additional_cost)
+                        
+                        reply = follow_up_response.get("content", "")
+                    else:
+                        reply = claude_response.get("content", "")
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "overloaded" in error_str.lower():
+                        await message.channel.send(
+                            f"⚠️ **Claude is currently overloaded**\n"
+                            f"Please try again in a moment or switch to an OpenAI model."
+                        )
+                        return
+                    else:
+                        raise e
+            else:
+                # Use OpenAI API (existing logic)
+                # Prepare API call parameters
+                api_params = {
+                    "model": model,
+                    "messages": messages_for_api,
+                    "timeout": 240  # Increased timeout for better response handling
+                }
+                
+                # Add temperature and top_p only for models that support them (exclude GPT-5 family)
+                if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
+                    api_params["temperature"] = 0.3
+                    api_params["top_p"] = 0.7
+                elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                    # For other models (not GPT-4o family and not GPT-5 family)
+                    api_params["temperature"] = 1
+                    api_params["top_p"] = 1
+                
+                # Add tools if using a supported model
+                if use_tools:
+                    tools = get_tools_for_model()
+                    api_params["tools"] = tools
+                
+                # Make the initial API call
+                try:
+                    response = await self.client.chat.completions.create(**api_params)
+                except Exception as e:
+                    # Handle 413 Request Entity Too Large error with a user-friendly message
+                    if "413" in str(e) or "tokens_limit_reached" in str(e) or "Request body too large" in str(e):
+                        await message.channel.send(
+                            f"❌ **Request too large for {model}**\n"
+                            f"Your conversation history or message is too large for this model.\n"
+                            f"Try:\n"
+                            f"• Using `/reset` to start fresh\n"
+                            f"• Using a model with higher token limits\n"
+                            f"• Reducing the size of your current message\n"
+                            f"• Breaking up large files into smaller pieces"
+                        )
+                        return
+                    else:
+                        # Re-raise other errors
+                        raise e
+                
+                # Extract token usage and calculate cost
+                input_tokens = 0
+                output_tokens = 0
+                total_cost = 0.0
+                
+                if hasattr(response, 'usage') and response.usage:
+                    input_tokens = getattr(response.usage, 'prompt_tokens', 0)
+                    output_tokens = getattr(response.usage, 'completion_tokens', 0)
+                    
+                    # Calculate cost based on model pricing
+                    pricing = MODEL_PRICING.get(model)
+                    if pricing:
+                        total_cost = pricing.calculate_cost(input_tokens, output_tokens)
+                        
+                        logging.info(f"API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: {format_cost(total_cost)}")
+                        
+                        # Save token usage and cost to database
+                        await self.db.save_token_usage(user_id, model, input_tokens, output_tokens, total_cost)
+                
+                # Process tool calls if any (OpenAI)
+                updated_messages = None
+                if use_tools and response.choices[0].finish_reason == "tool_calls":
+                    # Process tools
+                    tool_calls = response.choices[0].message.tool_calls
+                    tool_messages = {}
+                    
+                    # Track which tools are being called
+                    for tool_call in tool_calls:
+                        if tool_call.function.name in self.tool_mapping:
+                            tool_messages[tool_call.function.name] = True
+                            if tool_call.function.name == "generate_image":
+                                image_generation_used = True
+                            elif tool_call.function.name == "edit_image":
+                                # Display appropriate message for image editing
+                                await message.channel.send("🖌️ Editing image...")
+                    
+                    # Display appropriate messages based on which tools are being called
+                    if tool_messages.get("google_search") or tool_messages.get("scrape_webpage"):
+                        await message.channel.send("🔍 Researching information...")
+                    
+                    if tool_messages.get("execute_python_code") or tool_messages.get("analyze_data_file"):
+                        await message.channel.send("💻 Running code...")
+                    
+                    if tool_messages.get("generate_image"):
+                        await message.channel.send("🎨 Generating images...")
+                        
+                    if tool_messages.get("set_reminder") or tool_messages.get("get_reminders"):
+                        await message.channel.send("📅 Processing reminders...")
+                    
+                    if not tool_messages:                        
+                        await message.channel.send("🤔 Processing...")
+                    
+                    # Process any tool calls and get the updated messages
+                    tool_calls_processed, updated_messages = await process_tool_calls(
+                        self.client, 
+                        response, 
+                        messages_for_api, 
+                        self.tool_mapping
+                    )
+                    
+                    # Process tool responses to extract important data (images, charts)
+                    if updated_messages:
+                        # Look for image generation and code interpreter tool responses
+                        for msg in updated_messages:
+                            if msg.get('role') == 'tool' and msg.get('name') == 'generate_image':
+                                try:
+                                    tool_result = json.loads(msg.get('content', '{}'))
+                                    if tool_result.get('image_urls'):
+                                        image_urls.extend(tool_result['image_urls'])
+                                except:
+                                    pass
                             
-                            logging.info(f"Follow-up API call - Model: {model}, Input tokens: {follow_up_input_tokens}, Output tokens: {follow_up_output_tokens}, Additional cost: {format_cost(additional_cost)}")
+                            elif msg.get('role') == 'tool' and msg.get('name') == 'edit_image':
+                                try:
+                                    tool_result = json.loads(msg.get('content', '{}'))
+                                    if tool_result.get('image_url'):
+                                        image_urls.append(tool_result['image_url'])
+                                except:
+                                    pass
                             
-                            # Save additional token usage and cost to database
-                            await self.db.save_token_usage(user_id, model, follow_up_input_tokens, follow_up_output_tokens, additional_cost)
-            
-            reply = response.choices[0].message.content
+                            elif msg.get('role') == 'tool' and msg.get('name') in ['execute_python_code', 'analyze_data_file']:
+                                try:
+                                    tool_result = json.loads(msg.get('content', '{}'))
+                                    if tool_result.get('chart_id'):
+                                        chart_id = tool_result['chart_id']
+                                except:
+                                    pass
+                    
+                    # If tool calls were processed, make another API call with the updated messages
+                    if tool_calls_processed and updated_messages:
+                        # Prepare API parameters for follow-up call
+                        follow_up_params = {
+                            "model": model,
+                            "messages": updated_messages,
+                            "timeout": 240
+                        }
+                        
+                        # Add temperature only for models that support it (exclude GPT-5 family)
+                        if model in ["openai/gpt-4o", "openai/gpt-4o-mini"]:
+                            follow_up_params["temperature"] = 0.3
+                        elif model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                            follow_up_params["temperature"] = 1
+                        
+                        response = await self.client.chat.completions.create(**follow_up_params)
+                        
+                        # Extract token usage and calculate cost for follow-up call
+                        if hasattr(response, 'usage') and response.usage:
+                            follow_up_input_tokens = getattr(response.usage, 'prompt_tokens', 0)
+                            follow_up_output_tokens = getattr(response.usage, 'completion_tokens', 0)
+                            
+                            input_tokens += follow_up_input_tokens
+                            output_tokens += follow_up_output_tokens
+                            
+                            # Calculate additional cost
+                            pricing = MODEL_PRICING.get(model)
+                            if pricing:
+                                additional_cost = pricing.calculate_cost(follow_up_input_tokens, follow_up_output_tokens)
+                                total_cost += additional_cost
+                                
+                                logging.info(f"Follow-up API call - Model: {model}, Input tokens: {follow_up_input_tokens}, Output tokens: {follow_up_output_tokens}, Additional cost: {format_cost(additional_cost)}")
+                                
+                                # Save additional token usage and cost to database
+                                await self.db.save_token_usage(user_id, model, follow_up_input_tokens, follow_up_output_tokens, additional_cost)
+                
+                reply = response.choices[0].message.content
             
             # Add image URLs to assistant content if any were found
             has_images = len(image_urls) > 0
@@ -1724,7 +1887,15 @@ print("\\n=== Correlation Analysis ===")
                     })
             
             # Store the response in history for models that support it
-            if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o1-mini", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano", "openai/gpt-4.1-mini", "openai/o3", "openai/o4-mini", "openai/o1-preview"]:
+            models_with_history = [
+                "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", 
+                "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o1-mini", 
+                "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-nano", "openai/gpt-4.1-mini", 
+                "openai/o3", "openai/o4-mini", "openai/o1-preview",
+                "anthropic/claude-sonnet-4-20250514", "anthropic/claude-opus-4-20250514",
+                "anthropic/claude-3.5-sonnet", "anthropic/claude-3.5-haiku"
+            ]
+            if model in models_with_history:
                 if model in ["openai/o1-mini", "openai/o1-preview"]:
                     # For models without system prompt support, keep track separately
                     if has_images:
