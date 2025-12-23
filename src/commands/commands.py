@@ -12,6 +12,7 @@ from src.utils.image_utils import ImageGenerator
 from src.utils.web_utils import google_custom_search, scrape_web_content
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.openai_utils import prepare_file_from_path
+from src.utils.claude_utils import is_claude_model, call_claude_api
 from src.utils.token_counter import token_counter
 from src.utils.code_interpreter import delete_all_user_files
 from src.utils.discord_utils import create_info_embed, create_error_embed, create_success_embed
@@ -69,7 +70,7 @@ async def image_model_autocomplete(
         for model in matches[:25]
     ]
 
-def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator: ImageGenerator):
+def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator: ImageGenerator, claude_client=None):
     """
     Set up all slash commands for the bot.
     
@@ -78,6 +79,7 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
         db_handler: Database handler instance
         openai_client: OpenAI client instance
         image_generator: Image generator instance
+        claude_client: Claude (Anthropic) client instance (optional)
     """
     tree = bot.tree
     
@@ -265,24 +267,53 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                     f"(text: {input_token_count['text_tokens']}, images: {input_token_count['image_tokens']})"
                 )
 
-                # Send to the AI model
-                api_params = {
-                    "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
-                    "messages": messages
-                }
-                
-                # Add temperature only for models that support it (exclude GPT-5 family)
-                if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
-                    api_params["temperature"] = 0.5
-                
-                response = await openai_client.chat.completions.create(**api_params)
+                # Check if using Claude model
+                if is_claude_model(model):
+                    if not claude_client:
+                        await interaction.followup.send(
+                            "❌ Claude API not configured. Please set ANTHROPIC_API_KEY.",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    # Call Claude API
+                    claude_response = await call_claude_api(
+                        claude_client,
+                        messages,
+                        model,
+                        max_tokens=4096,
+                        temperature=0.5
+                    )
+                    
+                    if not claude_response.get("success"):
+                        await interaction.followup.send(
+                            f"❌ Claude API Error: {claude_response.get('error', 'Unknown error')}",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    reply = claude_response.get("content", "")
+                    actual_input_tokens = claude_response.get("input_tokens", 0)
+                    actual_output_tokens = claude_response.get("output_tokens", 0)
+                else:
+                    # Send to the OpenAI model
+                    api_params = {
+                        "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
+                        "messages": messages
+                    }
+                    
+                    # Add temperature only for models that support it (exclude GPT-5 family)
+                    if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                        api_params["temperature"] = 0.5
+                    
+                    response = await openai_client.chat.completions.create(**api_params)
 
-                reply = response.choices[0].message.content
-                
-                # Get actual token usage from API response
-                usage = response.usage
-                actual_input_tokens = usage.prompt_tokens if usage else input_token_count['total_tokens']
-                actual_output_tokens = usage.completion_tokens if usage else token_counter.count_text_tokens(reply, model)
+                    reply = response.choices[0].message.content
+                    
+                    # Get actual token usage from API response
+                    usage = response.usage
+                    actual_input_tokens = usage.prompt_tokens if usage else input_token_count['total_tokens']
+                    actual_output_tokens = usage.completion_tokens if usage else token_counter.count_text_tokens(reply, model)
                 
                 # Calculate cost
                 cost = token_counter.estimate_cost(actual_input_tokens, actual_output_tokens, model)
@@ -362,19 +393,47 @@ def setup_commands(bot: commands.Bot, db_handler, openai_client, image_generator
                         {"role": "user", "content": f"Content from {url}:\n{content}"}
                     ]
 
-                api_params = {
-                    "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
-                    "messages": messages
-                }
-                
-                # Add temperature and top_p only for models that support them (exclude GPT-5 family)
-                if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
-                    api_params["temperature"] = 0.3
-                    api_params["top_p"] = 0.7
-                
-                response = await openai_client.chat.completions.create(**api_params)
+                # Check if using Claude model
+                if is_claude_model(model):
+                    if not claude_client:
+                        await interaction.followup.send(
+                            "❌ Claude API not configured. Please set ANTHROPIC_API_KEY.",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    # Call Claude API
+                    claude_response = await call_claude_api(
+                        claude_client,
+                        messages,
+                        model,
+                        max_tokens=4096,
+                        temperature=0.3
+                    )
+                    
+                    if not claude_response.get("success"):
+                        await interaction.followup.send(
+                            f"❌ Claude API Error: {claude_response.get('error', 'Unknown error')}",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    reply = claude_response.get("content", "")
+                else:
+                    # Send to the OpenAI model
+                    api_params = {
+                        "model": model if model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"] else "openai/gpt-4o",
+                        "messages": messages
+                    }
+                    
+                    # Add temperature and top_p only for models that support them (exclude GPT-5 family)
+                    if model not in ["openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat"]:
+                        api_params["temperature"] = 0.3
+                        api_params["top_p"] = 0.7
+                    
+                    response = await openai_client.chat.completions.create(**api_params)
 
-                reply = response.choices[0].message.content
+                    reply = response.choices[0].message.content
                 
                 # Add the interaction to history
                 history.append({"role": "user", "content": f"Scraped content from {url}"})

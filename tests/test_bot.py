@@ -375,5 +375,64 @@ class TestPDFUtils(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('file', kwargs)
 
 
+class TestClaudeUtils(unittest.TestCase):
+    """Test Claude utility functions"""
+    
+    def test_is_claude_model(self):
+        from src.utils.claude_utils import is_claude_model
+        
+        # Test Claude models
+        self.assertTrue(is_claude_model("claude/claude-3-5-sonnet"))
+        self.assertTrue(is_claude_model("claude/claude-3-5-haiku"))
+        self.assertTrue(is_claude_model("claude/claude-3-opus"))
+        
+        # Test non-Claude models
+        self.assertFalse(is_claude_model("openai/gpt-4o"))
+        self.assertFalse(is_claude_model("openai/gpt-4o-mini"))
+        self.assertFalse(is_claude_model("gpt-4"))
+    
+    def test_get_anthropic_model_name(self):
+        from src.utils.claude_utils import get_anthropic_model_name
+        
+        # Test model name mapping
+        self.assertEqual(get_anthropic_model_name("claude/claude-3-5-sonnet"), "claude-3-5-sonnet-20241022")
+        self.assertEqual(get_anthropic_model_name("claude/claude-3-5-haiku"), "claude-3-5-haiku-20241022")
+        self.assertEqual(get_anthropic_model_name("claude/claude-3-opus"), "claude-3-opus-20240229")
+        
+        # Test unknown model (returns as-is)
+        self.assertEqual(get_anthropic_model_name("unknown-model"), "unknown-model")
+    
+    def test_convert_messages_for_claude(self):
+        from src.utils.claude_utils import convert_messages_for_claude
+        
+        # Test with system message
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello!"},
+            {"role": "assistant", "content": "Hi there!"}
+        ]
+        system_prompt, converted = convert_messages_for_claude(messages)
+        
+        self.assertEqual(system_prompt, "You are a helpful assistant.")
+        self.assertEqual(len(converted), 2)  # System message should be extracted
+        self.assertEqual(converted[0]["role"], "user")
+        self.assertEqual(converted[0]["content"], "Hello!")
+        self.assertEqual(converted[1]["role"], "assistant")
+        self.assertEqual(converted[1]["content"], "Hi there!")
+    
+    def test_convert_messages_without_system(self):
+        from src.utils.claude_utils import convert_messages_for_claude
+        
+        # Test without system message
+        messages = [
+            {"role": "user", "content": "Hello!"},
+            {"role": "assistant", "content": "Hi!"}
+        ]
+        system_prompt, converted = convert_messages_for_claude(messages)
+        
+        self.assertIsNone(system_prompt)
+        self.assertEqual(len(converted), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

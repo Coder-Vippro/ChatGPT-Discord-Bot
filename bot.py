@@ -17,7 +17,7 @@ from src.config.config import (
     DISCORD_TOKEN, MONGODB_URI, RUNWARE_API_KEY, STATUSES, 
     LOGGING_CONFIG, ENABLE_WEBHOOK_LOGGING, LOGGING_WEBHOOK_URL, 
     WEBHOOK_LOG_LEVEL, WEBHOOK_APP_NAME, WEBHOOK_BATCH_SIZE, 
-    WEBHOOK_FLUSH_INTERVAL, LOG_LEVEL_MAP
+    WEBHOOK_FLUSH_INTERVAL, LOG_LEVEL_MAP, ANTHROPIC_API_KEY
 )
 
 # Import webhook logger
@@ -124,6 +124,20 @@ async def main():
         logging.error(f"Error initializing OpenAI client: {e}")
         return
     
+    # Initialize the Claude (Anthropic) client if API key is available
+    claude_client = None
+    if ANTHROPIC_API_KEY:
+        try:
+            from anthropic import AsyncAnthropic
+            claude_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            logging.info("Claude (Anthropic) client initialized successfully")
+        except ImportError:
+            logging.warning("Failed to import Anthropic. Make sure it's installed: pip install anthropic")
+        except Exception as e:
+            logging.warning(f"Error initializing Claude client: {e}")
+    else:
+        logging.info("ANTHROPIC_API_KEY not set - Claude models will not be available")
+    
     # Global references to objects that need cleanup
     message_handler = None
     db_handler = None
@@ -191,14 +205,14 @@ async def main():
             await ctx.send(f"Error: {error_msg}")
         
         # Initialize message handler
-        message_handler = MessageHandler(bot, db_handler, openai_client, image_generator)
+        message_handler = MessageHandler(bot, db_handler, openai_client, image_generator, claude_client)
         
         # Attach db_handler to bot for cogs
         bot.db_handler = db_handler
         
         # Set up slash commands
         from src.commands.commands import setup_commands
-        setup_commands(bot, db_handler, openai_client, image_generator)
+        setup_commands(bot, db_handler, openai_client, image_generator, claude_client)
         
         # Load file management commands
         try:

@@ -15,6 +15,7 @@ import base64
 import traceback
 from datetime import datetime, timedelta
 from src.utils.openai_utils import process_tool_calls, prepare_messages_for_api, get_tools_for_model
+from src.utils.claude_utils import is_claude_model, call_claude_api, convert_messages_for_claude
 from src.utils.pdf_utils import process_pdf, send_response
 from src.utils.code_utils import extract_code_blocks
 from src.utils.reminder_utils import ReminderManager
@@ -95,7 +96,7 @@ except ImportError as e:
     logging.warning(f"Data analysis libraries not available: {str(e)}")
 
 class MessageHandler:
-    def __init__(self, bot, db_handler, openai_client, image_generator):
+    def __init__(self, bot, db_handler, openai_client, image_generator, claude_client=None):
         """
         Initialize the message handler.
         
@@ -104,10 +105,12 @@ class MessageHandler:
             db_handler: Database handler instance
             openai_client: OpenAI client instance
             image_generator: Image generator instance
+            claude_client: Claude (Anthropic) client instance (optional)
         """
         self.bot = bot
         self.db = db_handler
         self.client = openai_client
+        self.claude_client = claude_client
         self.image_generator = image_generator
         self.aiohttp_session = None
         
@@ -1514,6 +1517,7 @@ print("\\n=== Correlation Analysis ===")
             
             # Determine which models should have tools available
             # openai/o1-mini and openai/o1-preview do not support tools
+            # Claude models also don't support OpenAI-style tools (yet)
             use_tools = model in ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-5", "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5-chat", "openai/o1", "openai/o3-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano", "openai/o3", "openai/o4-mini"]
             
             # Count tokens being sent to API
@@ -1535,6 +1539,79 @@ print("\\n=== Correlation Analysis ===")
             logging.info(f"API Request Debug - Model: {model}, Messages: {len(messages_for_api)}, "
                         f"Est. tokens: {estimated_tokens}, Content length: {total_content_length} chars")
             
+            # Initialize variables to track tool responses
+            image_generation_used = False
+            chart_id = None
+            image_urls = []  # Will store unique image URLs
+            
+            # Check if this is a Claude model
+            if is_claude_model(model):
+                # Handle Claude API call
+                if not self.claude_client:
+                    await message.channel.send(
+                        f"❌ **Claude API not configured**\n"
+                        f"The Claude model `{model}` requires an Anthropic API key.\n"
+                        f"Please set `ANTHROPIC_API_KEY` in your environment variables."
+                    )
+                    return
+                
+                try:
+                    # Call Claude API
+                    claude_response = await call_claude_api(
+                        self.claude_client,
+                        messages_for_api,
+                        model,
+                        max_tokens=4096,
+                        temperature=0.7
+                    )
+                    
+                    if not claude_response.get("success"):
+                        error_msg = claude_response.get("error", "Unknown error")
+                        await message.channel.send(f"❌ **Claude API Error:** {error_msg}")
+                        return
+                    
+                    reply = claude_response.get("content", "")
+                    input_tokens = claude_response.get("input_tokens", 0)
+                    output_tokens = claude_response.get("output_tokens", 0)
+                    
+                    # Calculate cost
+                    pricing = MODEL_PRICING.get(model)
+                    if pricing:
+                        total_cost = pricing.calculate_cost(input_tokens, output_tokens)
+                        logging.info(f"Claude API call - Model: {model}, Input tokens: {input_tokens}, Output tokens: {output_tokens}, Cost: {format_cost(total_cost)}")
+                        await self.db.save_token_usage(user_id, model, input_tokens, output_tokens, total_cost)
+                    else:
+                        total_cost = 0.0
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "rate_limit" in error_str.lower():
+                        await message.channel.send(
+                            f"❌ **Rate limit exceeded**\n"
+                            f"Please wait a moment before trying again."
+                        )
+                    else:
+                        await message.channel.send(f"❌ **Claude API Error:** {error_str}")
+                    return
+                
+                # Store response in history for Claude models
+                history.append({"role": "assistant", "content": reply})
+                
+                # Only keep a reasonable amount of history
+                if len(history) > 15:
+                    history = history[:1] + history[-14:]
+                    
+                await self.db.save_history(user_id, history)
+                
+                # Send the response text
+                await send_response(message.channel, reply)
+                
+                # Log processing time and cost
+                processing_time = time.time() - start_time
+                logging.info(f"Message processed in {processing_time:.2f} seconds (User: {user_id}, Model: {model}, Cost: {format_cost(total_cost)})")
+                return
+            
+            # Handle OpenAI API call (existing logic)
             # Prepare API call parameters
             api_params = {
                 "model": model,
@@ -1555,11 +1632,6 @@ print("\\n=== Correlation Analysis ===")
             if use_tools:
                 tools = get_tools_for_model()
                 api_params["tools"] = tools
-            
-            # Initialize variables to track tool responses
-            image_generation_used = False
-            chart_id = None
-            image_urls = []  # Will store unique image URLs
             
             # Make the initial API call
             try:

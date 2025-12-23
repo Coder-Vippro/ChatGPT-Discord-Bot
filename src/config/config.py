@@ -101,7 +101,10 @@ MODEL_OPTIONS = [
     "openai/o1",
     "openai/o3-mini",
     "openai/o3",
-    "openai/o4-mini"
+    "openai/o4-mini",
+    "claude/claude-3-5-sonnet",
+    "claude/claude-3-5-haiku",
+    "claude/claude-3-opus",
 ]
 
 # ==================== IMAGE GENERATION MODELS ====================
@@ -175,7 +178,10 @@ MODEL_TOKEN_LIMITS = {
     "openai/gpt-5": 4000,
     "openai/gpt-5-nano": 4000,
     "openai/gpt-5-mini": 4000,
-    "openai/gpt-5-chat": 4000
+    "openai/gpt-5-chat": 4000,
+    "claude/claude-3-5-sonnet": 8000,
+    "claude/claude-3-5-haiku": 8000,
+    "claude/claude-3-opus": 8000,
 }
 
 # Default token limit for unknown models
@@ -403,6 +409,7 @@ RUNWARE_API_KEY = os.getenv("RUNWARE_API_KEY")
 MONGODB_URI = os.getenv("MONGODB_URI")
 ADMIN_ID = os.getenv("ADMIN_ID")  # Add ADMIN_ID if you're using it
 TIMEZONE = os.getenv("TIMEZONE", "UTC")  # Default to UTC if not specified
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")  # Claude API key
 
 # File management settings
 FILE_EXPIRATION_HOURS = int(os.getenv("FILE_EXPIRATION_HOURS", "48"))  # Hours until files expire (-1 for never)
@@ -416,5 +423,7 @@ if not MONGODB_URI:
     print("WARNING: MONGODB_URI not found in .env file")
 if not RUNWARE_API_KEY:
     print("WARNING: RUNWARE_API_KEY not found in .env file")
+if not ANTHROPIC_API_KEY:
+    print("INFO: ANTHROPIC_API_KEY not found in .env file - Claude models will not be available")
 if ENABLE_WEBHOOK_LOGGING and not LOGGING_WEBHOOK_URL:
     print("WARNING: Webhook logging enabled but LOGGING_WEBHOOK_URL not found in .env file")
