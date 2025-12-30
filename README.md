@@ -1,3 +1,6 @@
+#MOVED TO https://git.quocanh.me/coder-vippor/ChatGPT-Discord-Bot
+
+
 <div align="center">
 
 # 🤖 ChatGPT Discord Bot
