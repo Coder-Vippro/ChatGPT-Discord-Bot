@@ -51,6 +51,11 @@ MODEL_PRICING: Dict[str, ModelPricing] = {
     
     # o4 Family
     "openai/o4-mini": ModelPricing(input=2.00, output=8.00),
+    
+    # Claude Family (Anthropic)
+    "claude/claude-3-5-sonnet": ModelPricing(input=3.00, output=15.00),
+    "claude/claude-3-5-haiku": ModelPricing(input=0.80, output=4.00),
+    "claude/claude-3-opus": ModelPricing(input=15.00, output=75.00),
 }
 
 
